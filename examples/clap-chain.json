@@ -1,0 +1,14 @@
+{
+  "sample_rate": 48000,
+  "channels": 2,
+  "max_block": 256,
+  "chain": [
+    { "type": "gain", "gain_db": -3.0 },
+    {
+      "type": "clap",
+      "path": "C:/Program Files/Common Files/CLAP/YourPlugin.clap",
+      "plugin_id": "com.example.your-plugin",
+      "params": { "0": 0.5 }
+    }
+  ]
+}

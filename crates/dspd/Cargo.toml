@@ -1,0 +1,30 @@
+[package]
+name = "dspd"
+description = "Headless DSP server: offline render, realtime serve, plugin inspection"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+cpal-backend = ["dspd-audio/cpal-backend"]
+
+[dependencies]
+dspd-engine.workspace = true
+dspd-audio.workspace = true
+dspd-host-clap.workspace = true
+dspd-control.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+hound.workspace = true
+tempfile.workspace = true

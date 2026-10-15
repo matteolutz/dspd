@@ -1,0 +1,45 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/engine",
+    "crates/audio",
+    "crates/host-clap",
+    "crates/control",
+    "crates/dspd",
+    "crates/test-plugin",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.80"
+
+[workspace.dependencies]
+# internal crates
+dspd-engine = { path = "crates/engine" }
+dspd-audio = { path = "crates/audio" }
+dspd-host-clap = { path = "crates/host-clap" }
+dspd-control = { path = "crates/control" }
+
+# external
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rtrb = "0.3"
+hound = "3.5"
+libloading = "0.8"
+clap-sys = "0.5"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync"] }
+axum = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+cpal = "0.15"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+debug = "line-tables-only"

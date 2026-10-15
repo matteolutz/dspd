@@ -1,0 +1,18 @@
+[package]
+name = "dspd-host-clap"
+description = "Minimal headless CLAP plugin host implementing dspd_engine::Processor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dspd-engine.workspace = true
+anyhow.workspace = true
+libloading.workspace = true
+clap-sys.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true

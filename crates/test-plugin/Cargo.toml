@@ -1,0 +1,15 @@
+[package]
+name = "dspd-test-plugin"
+description = "Tiny stereo gain CLAP plugin used as a test fixture for the host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "dspd_test_plugin"
+crate-type = ["cdylib"]
+
+[dependencies]
+clap-sys.workspace = true

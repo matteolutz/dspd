@@ -1,0 +1,22 @@
+[package]
+name = "dspd-audio"
+description = "AudioBackend trait with offline (WAV), null and optional cpal backends"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# Live I/O through WASAPI / CoreAudio / ALSA / JACK. Needs libasound2-dev on Linux.
+cpal-backend = ["dep:cpal"]
+
+[dependencies]
+dspd-engine.workspace = true
+anyhow.workspace = true
+hound.workspace = true
+rtrb.workspace = true
+cpal = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
