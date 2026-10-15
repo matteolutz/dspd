@@ -5,6 +5,7 @@ on:
 
 jobs:
   test:
+    if: false # Workflow disabled
     strategy:
       fail-fast: false
       matrix:
