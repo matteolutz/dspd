@@ -7,7 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = []
+default = ["cpal-backend"]
 cpal-backend = ["dspd-audio/cpal-backend"]
 
 [dependencies]

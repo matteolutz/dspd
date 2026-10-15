@@ -1,14 +1,15 @@
 //! A tiny stereo gain plugin in CLAP format, used as a fixture to test the
 //! host without depending on any third-party plugin.
 //!
-//! * plugin id: `dev.dspd.test-gain`
+//! * plugin ids: `dev.dspd.test-gain` (stereo ports) and `dev.dspd.test-gain-mono` (mono ports)
 //! * one parameter: id 0, "Gain" in dB, range -60..+24, default 0
-//! * one stereo in / one stereo out audio port
+//! * one audio port in and out: a stereo pair (mono variant: a single channel)
 //! * parameter changes arrive as `CLAP_EVENT_PARAM_VALUE` events and apply to
 //!   the whole block they arrive in (no smoothing, so tests can be exact)
 
 use std::ffi::{c_char, c_void, CStr};
 use std::ptr;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use clap_sys::entry::clap_plugin_entry;
 use clap_sys::events::{
@@ -17,7 +18,7 @@ use clap_sys::events::{
 };
 use clap_sys::ext::audio_ports::{
     clap_audio_port_info, clap_plugin_audio_ports, CLAP_AUDIO_PORT_IS_MAIN, CLAP_EXT_AUDIO_PORTS,
-    CLAP_PORT_STEREO,
+    CLAP_PORT_MONO, CLAP_PORT_STEREO,
 };
 use clap_sys::ext::params::{
     clap_param_info, clap_plugin_params, CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE,
@@ -31,6 +32,7 @@ use clap_sys::process::{clap_process, clap_process_status, CLAP_PROCESS_CONTINUE
 use clap_sys::version::CLAP_VERSION;
 
 const PLUGIN_ID: &CStr = c"dev.dspd.test-gain";
+const MONO_PLUGIN_ID: &CStr = c"dev.dspd.test-gain-mono";
 const PARAM_GAIN: clap_id = 0;
 const GAIN_MIN_DB: f64 = -60.0;
 const GAIN_MAX_DB: f64 = 24.0;
@@ -58,6 +60,21 @@ static DESCRIPTOR: clap_plugin_descriptor = clap_plugin_descriptor {
     features: FEATURES.0.as_ptr(),
 };
 
+/// Same gain, but with one-channel audio ports. Exercises the host's handling
+/// of mono-only plugins (run as two linked instances on a stereo strip).
+static MONO_DESCRIPTOR: clap_plugin_descriptor = clap_plugin_descriptor {
+    clap_version: CLAP_VERSION,
+    id: MONO_PLUGIN_ID.as_ptr(),
+    name: c"dspd Test Gain (mono)".as_ptr(),
+    vendor: c"dspd".as_ptr(),
+    url: c"".as_ptr(),
+    manual_url: c"".as_ptr(),
+    support_url: c"".as_ptr(),
+    version: c"0.1.0".as_ptr(),
+    description: c"Mono gain used as a host test fixture".as_ptr(),
+    features: FEATURES.0.as_ptr(),
+};
+
 // ---------------------------------------------------------------------------
 // Instance
 // ---------------------------------------------------------------------------
@@ -66,6 +83,8 @@ static DESCRIPTOR: clap_plugin_descriptor = clap_plugin_descriptor {
 struct Instance {
     plugin: clap_plugin,
     gain_linear: f32,
+    /// One-channel audio ports instead of a stereo pair.
+    mono: bool,
 }
 
 fn db_to_linear(db: f64) -> f32 {
@@ -261,7 +280,7 @@ unsafe extern "C" fn audio_ports_count(_plugin: *const clap_plugin, _is_input: b
 }
 
 unsafe extern "C" fn audio_ports_get(
-    _plugin: *const clap_plugin,
+    plugin: *const clap_plugin,
     index: u32,
     _is_input: bool,
     info: *mut clap_audio_port_info,
@@ -273,8 +292,13 @@ unsafe extern "C" fn audio_ports_get(
     out.id = 0;
     write_cstr(&mut out.name, "main");
     out.flags = CLAP_AUDIO_PORT_IS_MAIN;
-    out.channel_count = 2;
-    out.port_type = CLAP_PORT_STEREO.as_ptr();
+    if instance(plugin).mono {
+        out.channel_count = 1;
+        out.port_type = CLAP_PORT_MONO.as_ptr();
+    } else {
+        out.channel_count = 2;
+        out.port_type = CLAP_PORT_STEREO.as_ptr();
+    }
     out.in_place_pair = CLAP_INVALID_ID;
     *info = out;
     true
@@ -290,17 +314,17 @@ static AUDIO_PORTS: clap_plugin_audio_ports = clap_plugin_audio_ports {
 // ---------------------------------------------------------------------------
 
 unsafe extern "C" fn factory_count(_factory: *const clap_plugin_factory) -> u32 {
-    1
+    2
 }
 
 unsafe extern "C" fn factory_descriptor(
     _factory: *const clap_plugin_factory,
     index: u32,
 ) -> *const clap_plugin_descriptor {
-    if index == 0 {
-        &DESCRIPTOR
-    } else {
-        ptr::null()
+    match index {
+        0 => &DESCRIPTOR,
+        1 => &MONO_DESCRIPTOR,
+        _ => ptr::null(),
     }
 }
 
@@ -309,12 +333,20 @@ unsafe extern "C" fn factory_create(
     _host: *const clap_host,
     plugin_id: *const c_char,
 ) -> *const clap_plugin {
-    if plugin_id.is_null() || CStr::from_ptr(plugin_id) != PLUGIN_ID {
+    if plugin_id.is_null() {
         return ptr::null();
     }
+    let id = CStr::from_ptr(plugin_id);
+    let (desc, mono): (&'static clap_plugin_descriptor, bool) = if id == PLUGIN_ID {
+        (&DESCRIPTOR, false)
+    } else if id == MONO_PLUGIN_ID {
+        (&MONO_DESCRIPTOR, true)
+    } else {
+        return ptr::null();
+    };
     let boxed = Box::new(Instance {
         plugin: clap_plugin {
-            desc: &DESCRIPTOR,
+            desc,
             plugin_data: ptr::null_mut(),
             init: Some(plugin_init),
             destroy: Some(plugin_destroy),
@@ -328,6 +360,7 @@ unsafe extern "C" fn factory_create(
             on_main_thread: Some(plugin_on_main_thread),
         },
         gain_linear: 1.0,
+        mono,
     });
     let raw = Box::into_raw(boxed);
     (*raw).plugin.plugin_data = raw as *mut c_void;
@@ -340,11 +373,28 @@ static FACTORY: clap_plugin_factory = clap_plugin_factory {
     create_plugin: Some(factory_create),
 };
 
+static ENTRY_INITS: AtomicU32 = AtomicU32::new(0);
+static ENTRY_DEINITS: AtomicU32 = AtomicU32::new(0);
+
+/// Test hooks: how often the host called the entry's `init` / `deinit`.
+#[no_mangle]
+pub extern "C" fn dspd_test_entry_init_count() -> u32 {
+    ENTRY_INITS.load(Ordering::SeqCst)
+}
+
+#[no_mangle]
+pub extern "C" fn dspd_test_entry_deinit_count() -> u32 {
+    ENTRY_DEINITS.load(Ordering::SeqCst)
+}
+
 unsafe extern "C" fn entry_init(_plugin_path: *const c_char) -> bool {
+    ENTRY_INITS.fetch_add(1, Ordering::SeqCst);
     true
 }
 
-unsafe extern "C" fn entry_deinit() {}
+unsafe extern "C" fn entry_deinit() {
+    ENTRY_DEINITS.fetch_add(1, Ordering::SeqCst);
+}
 
 unsafe extern "C" fn entry_get_factory(factory_id: *const c_char) -> *const c_void {
     if !factory_id.is_null() && CStr::from_ptr(factory_id) == CLAP_PLUGIN_FACTORY_ID {

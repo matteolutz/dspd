@@ -5,7 +5,7 @@
 //! | GET    | `/health`       | liveness probe                                        |
 //! | GET    | `/session`      | the current session as JSON (params included)         |
 //! | GET    | `/stats`        | engine load, block count, overruns                    |
-//! | POST   | `/params`       | `{"stage":0,"param_id":0,"value":-6.0}` -> audio thread |
+//! | POST   | `/params`       | `{"strip":0,"stage":0,"param_id":0,"value":-6.0}` -> audio thread |
 //! | POST   | `/session/save` | write the session to the path given at startup        |
 //!
 //! Parameter changes go through the lock-free queue to the audio thread and
@@ -67,6 +67,9 @@ fn error(status: StatusCode, message: impl Into<String>) -> ApiError {
 
 #[derive(Debug, Deserialize)]
 struct ParamRequest {
+    /// Index into the session's `strips` list. Required on purpose: with many
+    /// strips, a forgotten field must not silently hit strip 0.
+    strip: u32,
     stage: u32,
     param_id: u32,
     value: f64,
@@ -92,14 +95,14 @@ async fn set_param(State(s): State<Shared>, Json(req): Json<ParamRequest>) -> Re
 
     // Validate against a copy so a rejected change leaves the session untouched.
     let mut candidate = session.clone();
-    if !candidate.apply_param(req.stage as usize, req.param_id, req.value) {
+    if !candidate.apply_param(req.strip as usize, req.stage as usize, req.param_id, req.value) {
         return Err(error(
             StatusCode::NOT_FOUND,
-            format!("no stage {} with parameter {}", req.stage, req.param_id),
+            format!("no strip {} stage {} with parameter {}", req.strip, req.stage, req.param_id),
         ));
     }
 
-    let event = ParamEvent { stage: req.stage, param_id: req.param_id, value: req.value };
+    let event = ParamEvent { strip: req.strip, stage: req.stage, param_id: req.param_id, value: req.value };
     if lock(&s.params).send(event).is_err() {
         return Err(error(StatusCode::SERVICE_UNAVAILABLE, "parameter queue is full; retry"));
     }
@@ -141,16 +144,25 @@ mod tests {
     use super::*;
     use axum::body::{to_bytes, Body};
     use axum::http::{Method, Request};
-    use dspd_engine::{param_channel, GainSpec, ParamReceiver, StageSpec};
+    use dspd_engine::{param_channel, GainSpec, ParamReceiver, StageSpec, StripSpec, Width};
     use tower::ServiceExt;
 
     fn setup(path: Option<PathBuf>) -> (Shared, ParamReceiver) {
         let (tx, rx) = param_channel(2);
+        let strip = |input: usize, width: Width| StripSpec {
+            name: None,
+            width,
+            input,
+            output: None,
+            chain: vec![StageSpec::Gain(GainSpec { gain_db: 0.0 })],
+        };
+        // strip 0: mono on channel 0; strip 1: stereo on channels 1-2
         let spec = SessionSpec {
             sample_rate: 48_000,
-            channels: 2,
             max_block: 128,
-            chain: vec![StageSpec::Gain(GainSpec { gain_db: 0.0 })],
+            inputs: None,
+            outputs: None,
+            strips: vec![strip(0, Width::Mono), strip(1, Width::Stereo)],
         };
         (Arc::new(ControlState::new(tx, spec, Arc::new(EngineStats::default()), path)), rx)
     }
@@ -183,22 +195,37 @@ mod tests {
     #[tokio::test]
     async fn param_reaches_queue_and_session() {
         let (state, mut rx) = setup(None);
-        let body = json!({"stage": 0, "param_id": 0, "value": -12.5});
+        let body = json!({"strip": 1, "stage": 0, "param_id": 0, "value": -12.5});
         let (status, _) = call(&state, Method::POST, "/params", Some(body)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
-        assert_eq!(rx.pop(), Some(ParamEvent { stage: 0, param_id: 0, value: -12.5 }));
+        assert_eq!(rx.pop(), Some(ParamEvent { strip: 1, stage: 0, param_id: 0, value: -12.5 }));
 
+        // Only the addressed strip changes in the session.
         let (_, session) = call(&state, Method::GET, "/session", None).await;
-        assert_eq!(session["chain"][0]["gain_db"], -12.5);
+        assert_eq!(session["strips"][1]["chain"][0]["gain_db"], -12.5);
+        assert_eq!(session["strips"][0]["chain"][0]["gain_db"], 0.0);
     }
 
     #[tokio::test]
-    async fn bad_stage_is_404_and_changes_nothing() {
+    async fn bad_address_is_404_and_changes_nothing() {
         let (state, mut rx) = setup(None);
-        let body = json!({"stage": 9, "param_id": 0, "value": 1.0});
-        let (status, err) = call(&state, Method::POST, "/params", Some(body)).await;
-        assert_eq!(status, StatusCode::NOT_FOUND);
-        assert!(err["error"].as_str().unwrap().contains("no stage 9"));
+        for body in [
+            json!({"strip": 0, "stage": 9, "param_id": 0, "value": 1.0}), // no such stage
+            json!({"strip": 7, "stage": 0, "param_id": 0, "value": 1.0}), // no such strip
+        ] {
+            let (status, err) = call(&state, Method::POST, "/params", Some(body)).await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+            assert!(err["error"].as_str().unwrap().contains("no strip"));
+        }
+        assert_eq!(rx.pop(), None);
+    }
+
+    #[tokio::test]
+    async fn missing_strip_field_is_rejected() {
+        let (state, mut rx) = setup(None);
+        let body = json!({"stage": 0, "param_id": 0, "value": 1.0});
+        let (status, _) = call(&state, Method::POST, "/params", Some(body)).await;
+        assert!(status.is_client_error(), "{status}");
         assert_eq!(rx.pop(), None);
     }
 
@@ -206,13 +233,13 @@ mod tests {
     async fn full_queue_is_503_and_session_unchanged() {
         let (state, _rx) = setup(None); // capacity 2, never drained
         for _ in 0..2 {
-            let b = json!({"stage": 0, "param_id": 0, "value": -1.0});
+            let b = json!({"strip": 0, "stage": 0, "param_id": 0, "value": -1.0});
             assert_eq!(call(&state, Method::POST, "/params", Some(b)).await.0, StatusCode::ACCEPTED);
         }
-        let b = json!({"stage": 0, "param_id": 0, "value": -99.0});
+        let b = json!({"strip": 0, "stage": 0, "param_id": 0, "value": -99.0});
         assert_eq!(call(&state, Method::POST, "/params", Some(b)).await.0, StatusCode::SERVICE_UNAVAILABLE);
         let (_, session) = call(&state, Method::GET, "/session", None).await;
-        assert_eq!(session["chain"][0]["gain_db"], -1.0);
+        assert_eq!(session["strips"][0]["chain"][0]["gain_db"], -1.0);
     }
 
     #[tokio::test]
@@ -223,12 +250,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("saved.json");
         let (state, _rx) = setup(Some(path.clone()));
-        let b = json!({"stage": 0, "param_id": 0, "value": -3.0});
+        let b = json!({"strip": 0, "stage": 0, "param_id": 0, "value": -3.0});
         call(&state, Method::POST, "/params", Some(b)).await;
         assert_eq!(call(&state, Method::POST, "/session/save", None).await.0, StatusCode::OK);
 
         let saved = SessionSpec::load(&path).unwrap();
-        match &saved.chain[0] {
+        match &saved.strips[0].chain[0] {
             StageSpec::Gain(g) => assert_eq!(g.gain_db, -3.0),
             other => panic!("unexpected {other:?}"),
         }

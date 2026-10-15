@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use serde::Serialize;
 
-use crate::{AudioBlock, Chain, ParamReceiver, Processor};
+use crate::{AudioBlock, ParamReceiver, Processor, Rack};
 
 /// Counters shared between the audio thread and observers (control API, CLI).
 /// All updates are relaxed atomics, so they are safe in the audio callback.
@@ -47,19 +47,19 @@ impl EngineStats {
     }
 }
 
-/// Audio-thread entry point: drains pending parameter changes, runs the chain
+/// Audio-thread entry point: drains pending parameter changes, runs the rack
 /// and records timing statistics.
 pub struct Engine {
-    chain: Chain,
+    rack: Rack,
     params: ParamReceiver,
     stats: Arc<EngineStats>,
     sample_rate: u32,
 }
 
 impl Engine {
-    pub fn new(chain: Chain, params: ParamReceiver, sample_rate: u32) -> Self {
+    pub fn new(rack: Rack, params: ParamReceiver, sample_rate: u32) -> Self {
         Self {
-            chain,
+            rack,
             params,
             stats: Arc::new(EngineStats::default()),
             sample_rate,
@@ -74,8 +74,8 @@ impl Engine {
         self.sample_rate
     }
 
-    pub fn chain(&self) -> &Chain {
-        &self.chain
+    pub fn rack(&self) -> &Rack {
+        &self.rack
     }
 }
 
@@ -88,9 +88,9 @@ impl Processor for Engine {
         let start = Instant::now();
 
         while let Some(ev) = self.params.pop() {
-            self.chain.set_param(ev.stage as usize, ev.param_id, ev.value);
+            self.rack.set_param(ev.strip as usize, ev.stage as usize, ev.param_id, ev.value);
         }
-        self.chain.process(input, output);
+        self.rack.process(input, output);
 
         let elapsed_ns = start.elapsed().as_nanos() as u64;
         let frames = input.frames() as u64;
@@ -106,14 +106,14 @@ impl Processor for Engine {
     }
 
     fn latency_frames(&self) -> u32 {
-        self.chain.total_latency_frames()
+        self.rack.latency_frames()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{param_channel, Gain, ParamEvent, Stage};
+    use crate::{param_channel, Chain, Gain, ParamEvent, Stage, Strip};
 
     #[test]
     fn param_events_are_applied_before_processing() {
@@ -126,8 +126,9 @@ mod tests {
                 processor: Box::new(Gain::new(0.0)),
             }],
         );
-        let mut engine = Engine::new(chain, rx, 48_000);
-        tx.send(ParamEvent { stage: 0, param_id: 0, value: -120.0 }).unwrap();
+        let rack = Rack::new(vec![Strip::new("s", 0, 0, chain)]);
+        let mut engine = Engine::new(rack, rx, 48_000);
+        tx.send(ParamEvent { strip: 0, stage: 0, param_id: 0, value: -120.0 }).unwrap();
 
         let mut input = AudioBlock::new(1, 64);
         input.channel_mut(0).fill(1.0);

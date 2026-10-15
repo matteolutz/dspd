@@ -1,8 +1,9 @@
 //! Lock-free parameter hand-off from control threads to the audio thread.
 
-/// A parameter change addressed to one stage of the chain.
+/// A parameter change addressed to one stage of one strip's chain.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ParamEvent {
+    pub strip: u32,
     pub stage: u32,
     pub param_id: u32,
     pub value: f64,
@@ -45,7 +46,7 @@ mod tests {
     #[test]
     fn fifo_and_full() {
         let (mut tx, mut rx) = param_channel(2);
-        let ev = |v| ParamEvent { stage: 0, param_id: 1, value: v };
+        let ev = |v| ParamEvent { strip: 0, stage: 0, param_id: 1, value: v };
         assert!(tx.send(ev(1.0)).is_ok());
         assert!(tx.send(ev(2.0)).is_ok());
         assert_eq!(tx.send(ev(3.0)), Err(ev(3.0)));

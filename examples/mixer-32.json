@@ -1,0 +1,338 @@
+{
+  "sample_rate": 48000,
+  "max_block": 256,
+  "inputs": 32,
+  "outputs": 32,
+  "strips": [
+    {
+      "name": "ch1",
+      "width": "mono",
+      "input": 0,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch2",
+      "width": "mono",
+      "input": 1,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch3",
+      "width": "mono",
+      "input": 2,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch4",
+      "width": "mono",
+      "input": 3,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch5",
+      "width": "mono",
+      "input": 4,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch6",
+      "width": "mono",
+      "input": 5,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch7",
+      "width": "mono",
+      "input": 6,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch8",
+      "width": "mono",
+      "input": 7,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch9",
+      "width": "mono",
+      "input": 8,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch10",
+      "width": "mono",
+      "input": 9,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch11",
+      "width": "mono",
+      "input": 10,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch12",
+      "width": "mono",
+      "input": 11,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch13",
+      "width": "mono",
+      "input": 12,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch14",
+      "width": "mono",
+      "input": 13,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch15",
+      "width": "mono",
+      "input": 14,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch16",
+      "width": "mono",
+      "input": 15,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch17",
+      "width": "mono",
+      "input": 16,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch18",
+      "width": "mono",
+      "input": 17,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch19",
+      "width": "mono",
+      "input": 18,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch20",
+      "width": "mono",
+      "input": 19,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch21",
+      "width": "mono",
+      "input": 20,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch22",
+      "width": "mono",
+      "input": 21,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch23",
+      "width": "mono",
+      "input": 22,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch24",
+      "width": "mono",
+      "input": 23,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch25",
+      "width": "mono",
+      "input": 24,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch26",
+      "width": "mono",
+      "input": 25,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch27",
+      "width": "mono",
+      "input": 26,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "ch28",
+      "width": "mono",
+      "input": 27,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "pair-a",
+      "width": "stereo",
+      "input": 28,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    },
+    {
+      "name": "pair-b",
+      "width": "stereo",
+      "input": 30,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        }
+      ]
+    }
+  ]
+}

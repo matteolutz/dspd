@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! dspd inspect plugin.clap                         list plugins and parameter ids
-//! dspd render  -s session.json -i in.wav -o out.wav   offline render
+//! dspd render  -s session.json -i in.wav -o out.wav   offline render (multichannel WAV in, WAV out)
 //! dspd bench   -s session.json --seconds 10        measure DSP load, no device
 //! dspd serve   -s session.json                     run live + REST control API
 //! ```
@@ -19,7 +19,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use dspd_audio::{probe_wav, AudioBackend, NullBackend, OfflineBackend, RunReport, Signal};
 use dspd_control::ControlState;
-use dspd_engine::{param_channel, BoxedProcessor, ClapSpec, Engine, ParamSender, Processor, SessionSpec};
+use dspd_engine::{param_channel, BoxedProcessor, ClapSpec, DualMono, Engine, ParamSender, Processor, SessionSpec, Width};
 use dspd_host_clap::{inspect, ClapProcessor};
 use tracing_subscriber::EnvFilter;
 
@@ -168,18 +168,53 @@ fn main() -> Result<()> {
 // shared helpers
 // ---------------------------------------------------------------------------
 
-/// Instantiate the session's chain (loading CLAP plugins) and wrap it in an engine.
+/// Load one CLAP stage for a strip of `width` channels (1 = mono, 2 = stereo).
+///
+/// * Plugin layout matches the strip: used directly.
+/// * Mono plugin on a stereo strip: two instances, one per side, with linked
+///   parameters (`DualMono`).
+/// * Stereo plugin on a mono strip: the mono signal feeds both inputs and the
+///   left output is kept. That works, but half the plugin's DSP is wasted.
+fn load_clap_stage(c: &ClapSpec, width: usize, sample_rate: f64, max_block: usize, instances: &mut usize) -> Result<BoxedProcessor> {
+    let mut load = || -> Result<ClapProcessor> {
+        *instances += 1;
+        ClapProcessor::load(&c.path, c.plugin_id.as_deref(), sample_rate, max_block)
+            .with_context(|| format!("loading plugin {}", c.path.display()))
+    };
+    let first = load()?;
+    if width == 2 && first.main_input_channels() == 1 {
+        let second = load()?;
+        tracing::debug!("{}: mono plugin on a stereo strip, running two linked instances", first.name());
+        return Ok(Box::new(DualMono::new(Box::new(first), Box::new(second), max_block)));
+    }
+    if width == 1 && first.main_input_channels() > 1 {
+        tracing::debug!("{}: stereo plugin on a mono strip, half its DSP is unused", first.name());
+    }
+    Ok(Box::new(first))
+}
+
+/// Instantiate every strip of the session (loading CLAP plugins) and wrap the rack in an engine.
 fn build_engine(spec: &SessionSpec) -> Result<(Engine, ParamSender)> {
+    if spec.strips.is_empty() {
+        bail!("the session has no strips");
+    }
     let sample_rate = f64::from(spec.sample_rate);
     let max_block = spec.max_block;
-    let chain = spec.build_chain(|c: &ClapSpec| -> Result<BoxedProcessor> {
-        let plugin = ClapProcessor::load(&c.path, c.plugin_id.as_deref(), sample_rate, max_block)
-            .with_context(|| format!("loading plugin {}", c.path.display()))?;
-        tracing::info!("loaded {} ({})", plugin.name(), c.path.display());
-        Ok(Box::new(plugin))
-    })?;
+    let mut instances = 0;
+    let rack = spec.build_rack(|c: &ClapSpec, width| load_clap_stage(c, width, sample_rate, max_block, &mut instances))?;
+    let mono = spec.strips.iter().filter(|s| s.width == Width::Mono).count();
+    tracing::info!(
+        "built {} strips ({} mono, {} stereo), {} plugin instances; {} in / {} out channels; rack latency {} frames",
+        spec.strips.len(),
+        mono,
+        spec.strips.len() - mono,
+        instances,
+        spec.input_channels(),
+        spec.output_channels(),
+        rack.latency_frames(),
+    );
     let (tx, rx) = param_channel(1024);
-    Ok((Engine::new(chain, rx, spec.sample_rate), tx))
+    Ok((Engine::new(rack, rx, spec.sample_rate), tx))
 }
 
 fn check_block(block: usize, spec: &SessionSpec) -> Result<()> {
@@ -197,7 +232,7 @@ fn print_summary(label: &str, report: &RunReport, engine_stats: &dspd_engine::St
     let audio_secs = report.frames_out as f64 / f64::from(sample_rate);
     let wall = report.wall.as_secs_f64().max(1e-9);
     eprintln!(
-        "{label}: {:.2}s of audio in {:.2}s ({:.1}x realtime) | DSP load avg {:.1}% | worst block {:.0} us | {} overruns | chain latency {} frames ({:.2} ms)",
+        "{label}: {:.2}s of audio in {:.2}s ({:.1}x realtime) | DSP load avg {:.1}% | worst block {:.0} us | {} overruns | rack latency {} frames ({:.2} ms)",
         audio_secs,
         wall,
         audio_secs / wall,
@@ -228,11 +263,20 @@ fn render(a: RenderArgs) -> Result<()> {
         bail!("--tail-seconds must not be negative");
     }
 
+    if usize::from(info.channels) < spec.input_channels() {
+        tracing::warn!(
+            "the session reads {} input channels but {} has only {}; the missing ones are silent",
+            spec.input_channels(),
+            a.input.display(),
+            info.channels
+        );
+    }
+
     let (engine, _params) = build_engine(&spec)?;
     let stats = engine.stats();
     let latency = engine.latency_frames();
 
-    let mut backend = OfflineBackend::new(&a.input, &a.output, spec.channels, a.block)
+    let mut backend = OfflineBackend::new(&a.input, &a.output, spec.output_channels(), a.block)
         .tail_frames((a.tail_seconds * f64::from(spec.sample_rate)) as u64)
         .compensate_latency(!a.no_latency_compensation);
     let report = backend.run(Box::new(engine), Arc::new(AtomicBool::new(false)))?;
@@ -253,7 +297,7 @@ fn bench(a: BenchArgs) -> Result<()> {
     let stats = engine.stats();
     let latency = engine.latency_frames();
 
-    let mut backend = NullBackend::new(spec.channels, a.block, spec.sample_rate)
+    let mut backend = NullBackend::new(spec.input_channels(), spec.output_channels(), a.block, spec.sample_rate)
         .signal(a.signal.into())
         .duration(Duration::from_secs_f64(a.seconds))
         .realtime(a.realtime);
@@ -310,13 +354,13 @@ fn serve(a: ServeArgs) -> Result<()> {
 
     let mut backend: Box<dyn AudioBackend> = match a.backend {
         BackendArg::Null => Box::new(
-            NullBackend::new(spec.channels, a.block, spec.sample_rate)
+            NullBackend::new(spec.input_channels(), spec.output_channels(), a.block, spec.sample_rate)
                 .signal(a.signal.into())
                 .realtime(true),
         ),
         #[cfg(feature = "cpal-backend")]
         BackendArg::Cpal => {
-            let mut b = dspd_audio::CpalBackend::new(spec.channels, a.block, spec.sample_rate);
+            let mut b = dspd_audio::CpalBackend::new(spec.input_channels(), spec.output_channels(), a.block, spec.sample_rate);
             if let Some(n) = &a.input_device {
                 b = b.input_device(n.clone());
             }
@@ -331,8 +375,8 @@ fn serve(a: ServeArgs) -> Result<()> {
     };
 
     tracing::info!(
-        "serving {} channel(s) at {} Hz, block {}, chain latency {} frames; ctrl-c to stop",
-        spec.channels, spec.sample_rate, a.block, latency
+        "serving {} in / {} out at {} Hz, block {}, rack latency {} frames; ctrl-c to stop",
+        spec.input_channels(), spec.output_channels(), spec.sample_rate, a.block, latency
     );
     let processor = AudioThreadInit::new(Box::new(engine), rt_cfg);
     let report = backend.run(Box::new(processor), stop)?;

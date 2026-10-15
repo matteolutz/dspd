@@ -20,7 +20,8 @@ use dspd_engine::{AudioBlock, Processor};
 use crate::{AudioBackend, RunReport};
 
 pub struct CpalBackend {
-    channels: usize,
+    in_channels: usize,
+    out_channels: usize,
     block_size: usize,
     sample_rate: u32,
     input_device: Option<String>,
@@ -62,9 +63,12 @@ fn find_device(host: &cpal::Host, name: Option<&str>, input: bool) -> Result<Opt
 }
 
 impl CpalBackend {
-    pub fn new(channels: usize, block_size: usize, sample_rate: u32) -> Self {
+    /// `in_channels` and `out_channels` are opened on the devices as asked; a
+    /// device that cannot provide that many channels makes `run` fail.
+    pub fn new(in_channels: usize, out_channels: usize, block_size: usize, sample_rate: u32) -> Self {
         Self {
-            channels,
+            in_channels,
+            out_channels,
             block_size,
             sample_rate,
             input_device: None,
@@ -99,17 +103,14 @@ impl AudioBackend for CpalBackend {
 
         let out_dev = find_device(&host, self.output_device.as_deref(), false)?.context("no output device available")?;
         let out_config = StreamConfig {
-            channels: self.channels as u16,
+            channels: self.out_channels as u16,
             sample_rate: SampleRate(self.sample_rate),
             buffer_size: BufferSize::Fixed(self.block_size as u32),
         };
 
         // Input is optional: no device (or disabled) means the chain gets silence.
         let in_dev = if self.use_input { find_device(&host, self.input_device.as_deref(), true)? } else { None };
-        let in_channels = match &in_dev {
-            Some(d) => d.default_input_config().context("querying input device")?.channels() as usize,
-            None => 1,
-        };
+        let in_channels = if in_dev.is_some() { self.in_channels } else { 1 };
 
         let errors = Arc::new(AtomicU64::new(0));
         let blocks = Arc::new(AtomicU64::new(0));
@@ -142,14 +143,14 @@ impl AudioBackend for CpalBackend {
                         },
                         None,
                     )
-                    .context("opening input stream (the device may not support this rate/block size as f32)")?;
+                    .with_context(|| format!("opening input stream ({in_channels} ch, {} Hz, block {}); the device may not support that as f32", self.sample_rate, self.block_size))?;
                 Some(stream)
             }
             None => None,
         };
         let has_input = in_stream.is_some();
 
-        let out_channels = self.channels;
+        let out_channels = self.out_channels;
         let block = self.block_size;
         let mut input = AudioBlock::new(in_channels, block);
         let mut output = AudioBlock::new(out_channels, block);
@@ -189,7 +190,7 @@ impl AudioBackend for CpalBackend {
                 },
                 None,
             )
-            .context("opening output stream (the device may not support this rate/block size as f32)")?;
+            .with_context(|| format!("opening output stream ({out_channels} ch, {} Hz, block {}); the device may not support that as f32", self.sample_rate, self.block_size))?;
 
         if let Some(s) = &in_stream {
             s.play().context("starting input stream")?;

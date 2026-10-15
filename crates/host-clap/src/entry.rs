@@ -1,8 +1,11 @@
 //! Loading `.clap` files and owning plugin instances (RAII).
 
+use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap_sys::entry::clap_plugin_entry;
@@ -58,14 +61,14 @@ fn resolve_binary(path: &Path) -> PathBuf {
 ///
 /// Field order matters: `_lib` is declared last so the shared library is
 /// unloaded after `Drop::drop` has called the entry's `deinit`.
-pub(crate) struct Entry {
+pub(crate) struct EntryInner {
     entry: *const clap_plugin_entry,
     factory: *const clap_plugin_factory,
     _lib: Library,
 }
 
-impl Entry {
-    pub fn load(path: &Path) -> Result<Self> {
+impl EntryInner {
+    fn load_uncached(path: &Path) -> Result<Self> {
         let binary = resolve_binary(path);
         // SAFETY: loading a plugin runs its initialisers; that is inherent to hosting.
         let lib = unsafe { Library::new(&binary) }
@@ -138,13 +141,53 @@ impl Entry {
     }
 }
 
-impl Drop for Entry {
+impl Drop for EntryInner {
     fn drop(&mut self) {
         unsafe {
             if let Some(deinit) = (*self.entry).deinit {
                 deinit();
             }
         }
+    }
+}
+
+// SAFETY: after `init` the entry and factory tables are never written, and CLAP
+// requires the factory to be usable from any thread. The library handle is
+// only dropped (unloaded) when the last reference goes away.
+unsafe impl Send for EntryInner {}
+unsafe impl Sync for EntryInner {}
+
+static CACHE: OnceLock<Mutex<HashMap<PathBuf, Weak<EntryInner>>>> = OnceLock::new();
+
+/// A shared handle to a loaded `.clap` library.
+///
+/// Loading the same file again returns the already-loaded library, so its
+/// `init` runs once however many plugin instances (strips) use it, and `deinit`
+/// runs when the last instance is gone.
+#[derive(Clone)]
+pub(crate) struct Entry(Arc<EntryInner>);
+
+impl Deref for Entry {
+    type Target = EntryInner;
+    fn deref(&self) -> &EntryInner {
+        &self.0
+    }
+}
+
+impl Entry {
+    pub fn load(path: &Path) -> Result<Self> {
+        let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let mut cache = CACHE
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(existing) = cache.get(&key).and_then(Weak::upgrade) {
+            return Ok(Self(existing));
+        }
+        cache.retain(|_, w| w.strong_count() > 0);
+        let loaded = Arc::new(EntryInner::load_uncached(path)?);
+        cache.insert(key, Arc::downgrade(&loaded));
+        Ok(Self(loaded))
     }
 }
 

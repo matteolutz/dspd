@@ -19,7 +19,8 @@ pub enum Signal {
 }
 
 pub struct NullBackend {
-    channels: usize,
+    in_channels: usize,
+    out_channels: usize,
     block_size: usize,
     sample_rate: u32,
     signal: Signal,
@@ -28,9 +29,11 @@ pub struct NullBackend {
 }
 
 impl NullBackend {
-    pub fn new(channels: usize, block_size: usize, sample_rate: u32) -> Self {
+    /// `in_channels` of generated signal go in; `out_channels` come back out and are discarded.
+    pub fn new(in_channels: usize, out_channels: usize, block_size: usize, sample_rate: u32) -> Self {
         Self {
-            channels,
+            in_channels,
+            out_channels,
             block_size,
             sample_rate,
             signal: Signal::Sine(440.0),
@@ -65,8 +68,8 @@ impl AudioBackend for NullBackend {
             .duration
             .map(|d| (d.as_secs_f64() * f64::from(self.sample_rate)) as u64);
 
-        let mut input = AudioBlock::new(self.channels, self.block_size);
-        let mut output = AudioBlock::new(self.channels, self.block_size);
+        let mut input = AudioBlock::new(self.in_channels, self.block_size);
+        let mut output = AudioBlock::new(self.out_channels, self.block_size);
         let mut phase = 0.0f32;
         let phase_step = match self.signal {
             Signal::Sine(f) => std::f32::consts::TAU * f / self.sample_rate as f32,
@@ -99,7 +102,7 @@ impl AudioBackend for NullBackend {
                         0.25 * ((rng as f32 / u32::MAX as f32) * 2.0 - 1.0)
                     }
                 };
-                for c in 0..self.channels {
+                for c in 0..self.in_channels {
                     input.channel_mut(c)[f] = s;
                 }
             }
@@ -130,7 +133,7 @@ mod tests {
 
     #[test]
     fn stops_after_duration_with_partial_last_block() {
-        let mut b = NullBackend::new(2, 100, 1000).duration(Duration::from_millis(1050));
+        let mut b = NullBackend::new(2, 2, 100, 1000).duration(Duration::from_millis(1050));
         let r = b.run(Box::new(Gain::new(0.0)), Arc::new(AtomicBool::new(false))).unwrap();
         assert_eq!(r.frames_in, 1050);
         assert_eq!(r.blocks, 11);
@@ -144,7 +147,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
             s2.store(true, Ordering::Relaxed);
         });
-        let mut b = NullBackend::new(1, 64, 48_000).realtime(true);
+        let mut b = NullBackend::new(1, 1, 64, 48_000).realtime(true);
         let r = b.run(Box::new(Gain::new(0.0)), stop).unwrap();
         t.join().unwrap();
         assert!(r.blocks > 0);

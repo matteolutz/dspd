@@ -1,8 +1,17 @@
 {
   "sample_rate": 48000,
-  "channels": 2,
   "max_block": 256,
-  "chain": [
-    { "type": "gain", "gain_db": -6.0 }
+  "strips": [
+    {
+      "name": "main",
+      "width": "mono",
+      "input": 0,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -6.0
+        }
+      ]
+    }
   ]
 }

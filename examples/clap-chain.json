@@ -1,14 +1,34 @@
 {
   "sample_rate": 48000,
-  "channels": 2,
   "max_block": 256,
-  "chain": [
-    { "type": "gain", "gain_db": -3.0 },
+  "strips": [
     {
-      "type": "clap",
-      "path": "C:/Program Files/Common Files/CLAP/YourPlugin.clap",
-      "plugin_id": "com.example.your-plugin",
-      "params": { "0": 0.5 }
+      "name": "vox",
+      "width": "mono",
+      "input": 0,
+      "chain": [
+        {
+          "type": "gain",
+          "gain_db": -3.0
+        },
+        {
+          "type": "clap",
+          "path": "/Users/matteolutz/Downloads/peakeater.clap",
+          "plugin_id": "com.T-Audio.peakeater",
+          "params": {
+            "2325040285": 0.2
+          }
+        },
+        {
+          "type": "clap",
+          "path": "/Users/matteolutz/Downloads/tape-echo-2-macos/CLAP/tape-echo-2.clap",
+          "plugin_id": "com.duskaudio.tape-echo",
+          "params": {
+            "1": 0.5,
+            "2": 0.5
+          }
+        }
+      ]
     }
   ]
 }

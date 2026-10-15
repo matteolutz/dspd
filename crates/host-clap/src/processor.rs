@@ -107,6 +107,8 @@ pub struct ClapProcessor {
     in_events: clap_input_events,
     out_events: clap_output_events,
     latency: u32,
+    main_in_channels: u32,
+    main_out_channels: u32,
     steady_time: i64,
     start_failed: bool,
     _entry: Entry,
@@ -167,11 +169,23 @@ impl ClapProcessor {
                 try_push: Some(out_events_try_push),
             },
             latency,
+            main_in_channels: in_channels.first().copied().unwrap_or(0),
+            main_out_channels: out_channels.first().copied().unwrap_or(0),
             steady_time: 0,
             start_failed: false,
             handle,
             _entry: entry,
         })
+    }
+
+    /// Channel count of the plugin's main audio input port (0 if it has none).
+    pub fn main_input_channels(&self) -> u32 {
+        self.main_in_channels
+    }
+
+    /// Channel count of the plugin's main audio output port (0 if it has none).
+    pub fn main_output_channels(&self) -> u32 {
+        self.main_out_channels
     }
 
     /// Number of parameter changes that were discarded because the per-block
