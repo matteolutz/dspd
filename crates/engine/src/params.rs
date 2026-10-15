@@ -28,7 +28,9 @@ pub fn param_channel(capacity: usize) -> (ParamSender, ParamReceiver) {
 impl ParamSender {
     /// Queue an event. Returns it back if the queue is full.
     pub fn send(&mut self, event: ParamEvent) -> Result<(), ParamEvent> {
-        self.producer.push(event).map_err(|rtrb::PushError::Full(e)| e)
+        self.producer
+            .push(event)
+            .map_err(|rtrb::PushError::Full(e)| e)
     }
 }
 
@@ -46,7 +48,12 @@ mod tests {
     #[test]
     fn fifo_and_full() {
         let (mut tx, mut rx) = param_channel(2);
-        let ev = |v| ParamEvent { strip: 0, stage: 0, param_id: 1, value: v };
+        let ev = |v| ParamEvent {
+            strip: 0,
+            stage: 0,
+            param_id: 1,
+            value: v,
+        };
         assert!(tx.send(ev(1.0)).is_ok());
         assert!(tx.send(ev(2.0)).is_ok());
         assert_eq!(tx.send(ev(3.0)), Err(ev(3.0)));

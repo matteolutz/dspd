@@ -18,18 +18,28 @@ fn build_test_plugin(dest: &Path) -> PathBuf {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let out = Command::new(cargo)
         .current_dir(&root)
-        .args(["build", "-p", "dspd-test-plugin", "--message-format=json-render-diagnostics"])
+        .args([
+            "build",
+            "-p",
+            "dspd-test-plugin",
+            "--message-format=json-render-diagnostics",
+        ])
         .output()
         .expect("failed to run cargo");
     assert!(out.status.success(), "building test plugin failed");
     for line in String::from_utf8_lossy(&out.stdout).lines() {
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
         if v["reason"] != "compiler-artifact" || v["target"]["name"] != "dspd_test_plugin" {
             continue;
         }
         for f in v["filenames"].as_array().into_iter().flatten() {
             let f = Path::new(f.as_str().unwrap());
-            if matches!(f.extension().and_then(|e| e.to_str()), Some("so" | "dll" | "dylib")) {
+            if matches!(
+                f.extension().and_then(|e| e.to_str()),
+                Some("so" | "dll" | "dylib")
+            ) {
                 let target = dest.join("test-gain.clap");
                 std::fs::copy(f, &target).unwrap();
                 return target;
@@ -82,17 +92,27 @@ fn big_session(dir: &Path, plugin: &Path) -> PathBuf {
             1 => clap_stage(plugin, STEREO_PLUGIN, db),
             _ => clap_stage(plugin, MONO_PLUGIN, db),
         };
-        strips.push(json!({"name": format!("mono{c}"), "width": "mono", "input": c, "chain": [stage]}));
+        strips.push(
+            json!({"name": format!("mono{c}"), "width": "mono", "input": c, "chain": [stage]}),
+        );
     }
     strips.push(json!({"name": "pair-a", "width": "stereo", "input": 28, "chain": [clap_stage(plugin, MONO_PLUGIN, -6.0206)]}));
     strips.push(json!({"name": "pair-b", "width": "stereo", "input": 30, "chain": [clap_stage(plugin, STEREO_PLUGIN, -12.0412)]}));
-    write_session(dir, json!({"sample_rate": 48000, "max_block": 256, "inputs": 32, "outputs": 32, "strips": strips}))
+    write_session(
+        dir,
+        json!({"sample_rate": 48000, "max_block": 256, "inputs": 32, "outputs": 32, "strips": strips}),
+    )
 }
 
 fn write_wav(path: &Path, channels: u16, frames: usize, value_of: impl Fn(usize) -> i16) {
     let mut w = WavWriter::create(
         path,
-        WavSpec { channels, sample_rate: 44_100, bits_per_sample: 16, sample_format: SampleFormat::Int },
+        WavSpec {
+            channels,
+            sample_rate: 44_100,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
+        },
     )
     .unwrap();
     for _ in 0..frames {
@@ -111,9 +131,12 @@ fn read_wav(path: &Path) -> (WavSpec, Vec<f32>) {
 
 fn render(session: &Path, input: &Path, output: &Path, block: &str) -> std::process::Output {
     Command::new(DSPD)
-        .args(["render", "-s"]).arg(session)
-        .arg("-i").arg(input)
-        .arg("-o").arg(output)
+        .args(["render", "-s"])
+        .arg(session)
+        .arg("-i")
+        .arg(input)
+        .arg("-o")
+        .arg(output)
         .args(["--block", block])
         .output()
         .unwrap()
@@ -128,7 +151,11 @@ fn render_runs_builtin_and_clap_stages_in_series() {
     write_wav(&input, 3, 5000, |_| 16384); // 0.5 full scale on all three inputs
 
     let out = render(&session, &input, &output, "100");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let (spec, samples) = read_wav(&output);
     // The input's 44.1 kHz wins over the session's 48 kHz; the session needs 3 output channels.
@@ -136,7 +163,10 @@ fn render_runs_builtin_and_clap_stages_in_series() {
     assert_eq!(samples.len(), 5000 * 3);
     for frame in samples.chunks(3) {
         // stereo strip: 0.5 * 0.5 * 0.5; mono strip with a 0 dB plugin: unchanged
-        assert!((frame[0] - 0.125).abs() < 1e-3 && (frame[1] - 0.125).abs() < 1e-3, "{frame:?}");
+        assert!(
+            (frame[0] - 0.125).abs() < 1e-3 && (frame[1] - 0.125).abs() < 1e-3,
+            "{frame:?}"
+        );
         assert!((frame[2] - 0.5).abs() < 1e-3, "{frame:?}");
     }
 }
@@ -153,7 +183,11 @@ fn render_32_channels_with_mono_and_stereo_strips() {
     write_wav(&input, 32, 3000, level);
 
     let out = render(&session, &input, &output, "128");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let (spec, samples) = read_wav(&output);
     assert_eq!(spec.channels, 32);
@@ -170,7 +204,11 @@ fn render_32_channels_with_mono_and_stereo_strips() {
     };
     for frame in samples.chunks(32).step_by(97) {
         for (c, got) in frame.iter().enumerate() {
-            assert!((got - want(c)).abs() < 2e-4, "channel {c}: got {got}, want {}", want(c));
+            assert!(
+                (got - want(c)).abs() < 2e-4,
+                "channel {c}: got {got}, want {}",
+                want(c)
+            );
         }
     }
 }
@@ -213,10 +251,17 @@ fn render_rejects_invalid_sessions() {
 fn inspect_prints_plugins_and_parameter() {
     let dir = tempfile::tempdir().unwrap();
     let plugin = build_test_plugin(dir.path());
-    let out = Command::new(DSPD).arg("inspect").arg(&plugin).output().unwrap();
+    let out = Command::new(DSPD)
+        .arg("inspect")
+        .arg(&plugin)
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains(STEREO_PLUGIN) && text.contains(MONO_PLUGIN), "{text}");
+    assert!(
+        text.contains(STEREO_PLUGIN) && text.contains(MONO_PLUGIN),
+        "{text}"
+    );
     assert!(text.contains("id=0") && text.contains("Gain"), "{text}");
 }
 
@@ -226,18 +271,25 @@ fn bench_reports_load_for_32_strips() {
     let plugin = build_test_plugin(dir.path());
     let session = big_session(dir.path(), &plugin);
     let out = Command::new(DSPD)
-        .args(["bench", "-s"]).arg(&session)
+        .args(["bench", "-s"])
+        .arg(&session)
         .args(["--seconds", "2"])
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{text}");
-    assert!(text.contains("x realtime") && text.contains("DSP load"), "{text}");
+    assert!(
+        text.contains("x realtime") && text.contains("DSP load"),
+        "{text}"
+    );
     // Plugin instances: mono strips 1,4,..,25 use the stereo plugin (9) and 2,5,..,26 the mono
     // plugin (9); channels 0,3,..,27 use the built-in gain (none). "pair-a" runs the mono plugin
     // twice (DualMono, 2) and "pair-b" the stereo plugin once (1): 9 + 9 + 2 + 1 = 21.
     assert!(text.contains("21 plugin instances"), "{text}");
-    assert!(text.contains("built 30 strips (28 mono, 2 stereo)"), "{text}");
+    assert!(
+        text.contains("built 30 strips (28 mono, 2 stereo)"),
+        "{text}"
+    );
 }
 
 // --- live server -----------------------------------------------------------
@@ -261,7 +313,11 @@ fn http(port: u16, method: &str, path: &str, body: Option<&str>) -> std::io::Res
     )?;
     let mut raw = String::new();
     s.read_to_string(&mut raw)?;
-    let status = raw.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
+    let status = raw
+        .split_whitespace()
+        .nth(1)
+        .and_then(|c| c.parse().ok())
+        .unwrap_or(0);
     let body = raw.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
     Ok((status, body))
 }
@@ -273,12 +329,19 @@ fn serve_exposes_control_api_while_processing() {
     let session = simple_session(dir.path(), &plugin);
 
     // Reserve a free port, release it, and hand it to the server.
-    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     let _server = Server(
         Command::new(DSPD)
-            .args(["serve", "-s"]).arg(&session)
+            .args(["serve", "-s"])
+            .arg(&session)
             .args(["--listen", &format!("127.0.0.1:{port}")])
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .spawn()
             .unwrap(),
     );
@@ -300,7 +363,10 @@ fn serve_exposes_control_api_while_processing() {
     assert_eq!(status, 200);
     let v: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(v["strips"][1]["chain"][0]["params"]["0"], -20.0);
-    assert_eq!(v["strips"][0]["chain"][1]["params"]["0"], -6.0206, "strip 0 must be untouched");
+    assert_eq!(
+        v["strips"][0]["chain"][1]["params"]["0"], -6.0206,
+        "strip 0 must be untouched"
+    );
 
     // The audio thread is running: block counter must advance.
     std::thread::sleep(Duration::from_millis(300));
@@ -309,8 +375,20 @@ fn serve_exposes_control_api_while_processing() {
     assert!(stats["blocks"].as_u64().unwrap() > 0, "{body}");
 
     // Unknown strip is rejected; so is a request without a strip.
-    let (status, _) = http(port, "POST", "/params", Some(r#"{"strip":7,"stage":0,"param_id":0,"value":1.0}"#)).unwrap();
+    let (status, _) = http(
+        port,
+        "POST",
+        "/params",
+        Some(r#"{"strip":7,"stage":0,"param_id":0,"value":1.0}"#),
+    )
+    .unwrap();
     assert_eq!(status, 404);
-    let (status, _) = http(port, "POST", "/params", Some(r#"{"stage":0,"param_id":0,"value":1.0}"#)).unwrap();
+    let (status, _) = http(
+        port,
+        "POST",
+        "/params",
+        Some(r#"{"stage":0,"param_id":0,"value":1.0}"#),
+    )
+    .unwrap();
     assert!((400..500).contains(&status), "{status}");
 }

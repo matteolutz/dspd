@@ -53,6 +53,14 @@ impl AudioBlock {
         &mut self.channels[index][..frames]
     }
 
+    pub fn sample(&self, channel_idx: usize, sample_idx: usize) -> f32 {
+        self.channel(channel_idx)[sample_idx]
+    }
+
+    pub fn set_sample(&mut self, channel_idx: usize, sample_idx: usize, value: f32) {
+        self.channel_mut(channel_idx)[sample_idx] = value
+    }
+
     /// Zero the valid region of every channel.
     pub fn clear(&mut self) {
         let frames = self.frames;

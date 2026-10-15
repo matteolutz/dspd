@@ -3,30 +3,24 @@
   "max_block": 256,
   "strips": [
     {
-      "name": "vox",
-      "width": "mono",
+      "name": "piano",
+      "width": "stereo",
       "input": 0,
       "chain": [
         {
-          "type": "gain",
-          "gain_db": -3.0
-        },
-        {
-          "type": "clap",
-          "path": "/Users/matteolutz/Downloads/peakeater.clap",
-          "plugin_id": "com.T-Audio.peakeater",
-          "params": {
-            "2325040285": 0.2
-          }
-        },
-        {
-          "type": "clap",
-          "path": "/Users/matteolutz/Downloads/tape-echo-2-macos/CLAP/tape-echo-2.clap",
-          "plugin_id": "com.duskaudio.tape-echo",
-          "params": {
-            "1": 0.5,
-            "2": 0.5
-          }
+          "type": "dyn_eq",
+          "bands": [
+            {
+              "freq": 400,
+              "q": 2,
+              "static_gain_db": 20,
+              "threshold_db": 20,
+              "ratio": 1,
+              "range_db": 0,
+              "attack_ms": 0,
+              "release_ms": 0
+            }
+          ]
         }
       ]
     }

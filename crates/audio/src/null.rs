@@ -30,7 +30,12 @@ pub struct NullBackend {
 
 impl NullBackend {
     /// `in_channels` of generated signal go in; `out_channels` come back out and are discarded.
-    pub fn new(in_channels: usize, out_channels: usize, block_size: usize, sample_rate: u32) -> Self {
+    pub fn new(
+        in_channels: usize,
+        out_channels: usize,
+        block_size: usize,
+        sample_rate: u32,
+    ) -> Self {
         Self {
             in_channels,
             out_channels,
@@ -62,7 +67,11 @@ impl NullBackend {
 }
 
 impl AudioBackend for NullBackend {
-    fn run(&mut self, mut processor: Box<dyn Processor + Send>, stop: Arc<AtomicBool>) -> Result<RunReport> {
+    fn run(
+        &mut self,
+        mut processor: Box<dyn Processor + Send>,
+        stop: Arc<AtomicBool>,
+    ) -> Result<RunReport> {
         let started = Instant::now();
         let limit = self
             .duration
@@ -80,7 +89,9 @@ impl AudioBackend for NullBackend {
         let mut report = RunReport::default();
         let mut frames_done = 0u64;
         while !stop.load(Ordering::Relaxed) && limit.map_or(true, |l| frames_done < l) {
-            let n = limit.map_or(self.block_size as u64, |l| (l - frames_done).min(self.block_size as u64)) as usize;
+            let n = limit.map_or(self.block_size as u64, |l| {
+                (l - frames_done).min(self.block_size as u64)
+            }) as usize;
             input.set_frames(n);
             output.set_frames(n);
 
@@ -112,7 +123,8 @@ impl AudioBackend for NullBackend {
             report.blocks += 1;
 
             if self.realtime {
-                let due = started + Duration::from_secs_f64(frames_done as f64 / f64::from(self.sample_rate));
+                let due = started
+                    + Duration::from_secs_f64(frames_done as f64 / f64::from(self.sample_rate));
                 if let Some(wait) = due.checked_duration_since(Instant::now()) {
                     std::thread::sleep(wait);
                 }
@@ -134,7 +146,9 @@ mod tests {
     #[test]
     fn stops_after_duration_with_partial_last_block() {
         let mut b = NullBackend::new(2, 2, 100, 1000).duration(Duration::from_millis(1050));
-        let r = b.run(Box::new(Gain::new(0.0)), Arc::new(AtomicBool::new(false))).unwrap();
+        let r = b
+            .run(Box::new(Gain::new(0.0)), Arc::new(AtomicBool::new(false)))
+            .unwrap();
         assert_eq!(r.frames_in, 1050);
         assert_eq!(r.blocks, 11);
     }

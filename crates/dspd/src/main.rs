@@ -19,7 +19,10 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use dspd_audio::{probe_wav, AudioBackend, NullBackend, OfflineBackend, RunReport, Signal};
 use dspd_control::ControlState;
-use dspd_engine::{param_channel, BoxedProcessor, ClapSpec, DualMono, Engine, ParamSender, Processor, SessionSpec, Width};
+use dspd_engine::{
+    param_channel, BoxedProcessor, ClapSpec, DualMono, Engine, ParamSender, Processor, SessionSpec,
+    Width,
+};
 use dspd_host_clap::{inspect, ClapProcessor};
 use tracing_subscriber::EnvFilter;
 
@@ -150,7 +153,9 @@ struct ServeArgs {
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .with_writer(std::io::stderr)
         .init();
 
@@ -175,7 +180,13 @@ fn main() -> Result<()> {
 ///   parameters (`DualMono`).
 /// * Stereo plugin on a mono strip: the mono signal feeds both inputs and the
 ///   left output is kept. That works, but half the plugin's DSP is wasted.
-fn load_clap_stage(c: &ClapSpec, width: usize, sample_rate: f64, max_block: usize, instances: &mut usize) -> Result<BoxedProcessor> {
+fn load_clap_stage(
+    c: &ClapSpec,
+    width: usize,
+    sample_rate: f64,
+    max_block: usize,
+    instances: &mut usize,
+) -> Result<BoxedProcessor> {
     let mut load = || -> Result<ClapProcessor> {
         *instances += 1;
         ClapProcessor::load(&c.path, c.plugin_id.as_deref(), sample_rate, max_block)
@@ -184,11 +195,21 @@ fn load_clap_stage(c: &ClapSpec, width: usize, sample_rate: f64, max_block: usiz
     let first = load()?;
     if width == 2 && first.main_input_channels() == 1 {
         let second = load()?;
-        tracing::debug!("{}: mono plugin on a stereo strip, running two linked instances", first.name());
-        return Ok(Box::new(DualMono::new(Box::new(first), Box::new(second), max_block)));
+        tracing::debug!(
+            "{}: mono plugin on a stereo strip, running two linked instances",
+            first.name()
+        );
+        return Ok(Box::new(DualMono::new(
+            Box::new(first),
+            Box::new(second),
+            max_block,
+        )));
     }
     if width == 1 && first.main_input_channels() > 1 {
-        tracing::debug!("{}: stereo plugin on a mono strip, half its DSP is unused", first.name());
+        tracing::debug!(
+            "{}: stereo plugin on a mono strip, half its DSP is unused",
+            first.name()
+        );
     }
     Ok(Box::new(first))
 }
@@ -201,8 +222,14 @@ fn build_engine(spec: &SessionSpec) -> Result<(Engine, ParamSender)> {
     let sample_rate = f64::from(spec.sample_rate);
     let max_block = spec.max_block;
     let mut instances = 0;
-    let rack = spec.build_rack(|c: &ClapSpec, width| load_clap_stage(c, width, sample_rate, max_block, &mut instances))?;
-    let mono = spec.strips.iter().filter(|s| s.width == Width::Mono).count();
+    let rack = spec.build_rack(|c: &ClapSpec, width| {
+        load_clap_stage(c, width, sample_rate, max_block, &mut instances)
+    })?;
+    let mono = spec
+        .strips
+        .iter()
+        .filter(|s| s.width == Width::Mono)
+        .count();
     tracing::info!(
         "built {} strips ({} mono, {} stereo), {} plugin instances; {} in / {} out channels; rack latency {} frames",
         spec.strips.len(),
@@ -219,7 +246,10 @@ fn build_engine(spec: &SessionSpec) -> Result<(Engine, ParamSender)> {
 
 fn check_block(block: usize, spec: &SessionSpec) -> Result<()> {
     if block == 0 || block > spec.max_block {
-        bail!("--block {block} must be between 1 and the session's max_block ({})", spec.max_block);
+        bail!(
+            "--block {block} must be between 1 and the session's max_block ({})",
+            spec.max_block
+        );
     }
     Ok(())
 }
@@ -228,7 +258,13 @@ fn load_session(path: &Path) -> Result<SessionSpec> {
     SessionSpec::load(path).with_context(|| format!("reading session {}", path.display()))
 }
 
-fn print_summary(label: &str, report: &RunReport, engine_stats: &dspd_engine::StatsSnapshot, sample_rate: u32, latency: u32) {
+fn print_summary(
+    label: &str,
+    report: &RunReport,
+    engine_stats: &dspd_engine::StatsSnapshot,
+    sample_rate: u32,
+    latency: u32,
+) {
     let audio_secs = report.frames_out as f64 / f64::from(sample_rate);
     let wall = report.wall.as_secs_f64().max(1e-9);
     eprintln!(
@@ -243,7 +279,10 @@ fn print_summary(label: &str, report: &RunReport, engine_stats: &dspd_engine::St
         f64::from(latency) * 1000.0 / f64::from(sample_rate),
     );
     if report.stream_errors > 0 {
-        eprintln!("warning: the audio device reported {} stream errors (xruns)", report.stream_errors);
+        eprintln!(
+            "warning: the audio device reported {} stream errors (xruns)",
+            report.stream_errors
+        );
     }
 }
 
@@ -255,7 +294,11 @@ fn render(a: RenderArgs) -> Result<()> {
     let mut spec = load_session(&a.session)?;
     let info = probe_wav(&a.input)?;
     if info.sample_rate != spec.sample_rate {
-        tracing::info!("using the input file's sample rate ({} Hz) instead of the session's ({} Hz)", info.sample_rate, spec.sample_rate);
+        tracing::info!(
+            "using the input file's sample rate ({} Hz) instead of the session's ({} Hz)",
+            info.sample_rate,
+            spec.sample_rate
+        );
         spec.sample_rate = info.sample_rate;
     }
     check_block(a.block, &spec)?;
@@ -281,7 +324,13 @@ fn render(a: RenderArgs) -> Result<()> {
         .compensate_latency(!a.no_latency_compensation);
     let report = backend.run(Box::new(engine), Arc::new(AtomicBool::new(false)))?;
 
-    print_summary("render", &report, &stats.snapshot(spec.sample_rate), spec.sample_rate, latency);
+    print_summary(
+        "render",
+        &report,
+        &stats.snapshot(spec.sample_rate),
+        spec.sample_rate,
+        latency,
+    );
     eprintln!("wrote {}", a.output.display());
     Ok(())
 }
@@ -297,10 +346,15 @@ fn bench(a: BenchArgs) -> Result<()> {
     let stats = engine.stats();
     let latency = engine.latency_frames();
 
-    let mut backend = NullBackend::new(spec.input_channels(), spec.output_channels(), a.block, spec.sample_rate)
-        .signal(a.signal.into())
-        .duration(Duration::from_secs_f64(a.seconds))
-        .realtime(a.realtime);
+    let mut backend = NullBackend::new(
+        spec.input_channels(),
+        spec.output_channels(),
+        a.block,
+        spec.sample_rate,
+    )
+    .signal(a.signal.into())
+    .duration(Duration::from_secs_f64(a.seconds))
+    .realtime(a.realtime);
     let report = backend.run(Box::new(engine), Arc::new(AtomicBool::new(false)))?;
 
     let snap = stats.snapshot(spec.sample_rate);
@@ -315,7 +369,10 @@ fn serve(a: ServeArgs) -> Result<()> {
     let spec = load_session(&a.session)?;
     check_block(a.block, &spec)?;
 
-    let rt_cfg = RtConfig { priority: a.rt_priority, pin_cpu: a.pin_cpu };
+    let rt_cfg = RtConfig {
+        priority: a.rt_priority,
+        pin_cpu: a.pin_cpu,
+    };
     if !rt_cfg.is_noop() {
         if let Err(e) = rt::lock_memory() {
             tracing::warn!("{e}");
@@ -325,7 +382,12 @@ fn serve(a: ServeArgs) -> Result<()> {
     let (engine, params) = build_engine(&spec)?;
     let stats = engine.stats();
     let latency = engine.latency_frames();
-    let state = Arc::new(ControlState::new(params, spec.clone(), Arc::clone(&stats), Some(a.session.clone())));
+    let state = Arc::new(ControlState::new(
+        params,
+        spec.clone(),
+        Arc::clone(&stats),
+        Some(a.session.clone()),
+    ));
 
     // The control API lives on a small tokio runtime; the audio side blocks this thread.
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -354,13 +416,23 @@ fn serve(a: ServeArgs) -> Result<()> {
 
     let mut backend: Box<dyn AudioBackend> = match a.backend {
         BackendArg::Null => Box::new(
-            NullBackend::new(spec.input_channels(), spec.output_channels(), a.block, spec.sample_rate)
-                .signal(a.signal.into())
-                .realtime(true),
+            NullBackend::new(
+                spec.input_channels(),
+                spec.output_channels(),
+                a.block,
+                spec.sample_rate,
+            )
+            .signal(a.signal.into())
+            .realtime(true),
         ),
         #[cfg(feature = "cpal-backend")]
         BackendArg::Cpal => {
-            let mut b = dspd_audio::CpalBackend::new(spec.input_channels(), spec.output_channels(), a.block, spec.sample_rate);
+            let mut b = dspd_audio::CpalBackend::new(
+                spec.input_channels(),
+                spec.output_channels(),
+                a.block,
+                spec.sample_rate,
+            );
             if let Some(n) = &a.input_device {
                 b = b.input_device(n.clone());
             }
@@ -376,12 +448,22 @@ fn serve(a: ServeArgs) -> Result<()> {
 
     tracing::info!(
         "serving {} in / {} out at {} Hz, block {}, rack latency {} frames; ctrl-c to stop",
-        spec.input_channels(), spec.output_channels(), spec.sample_rate, a.block, latency
+        spec.input_channels(),
+        spec.output_channels(),
+        spec.sample_rate,
+        a.block,
+        latency
     );
     let processor = AudioThreadInit::new(Box::new(engine), rt_cfg);
     let report = backend.run(Box::new(processor), stop)?;
 
-    print_summary("serve", &report, &stats.snapshot(spec.sample_rate), spec.sample_rate, latency);
+    print_summary(
+        "serve",
+        &report,
+        &stats.snapshot(spec.sample_rate),
+        spec.sample_rate,
+        latency,
+    );
     runtime.shutdown_background();
     Ok(())
 }
@@ -397,11 +479,21 @@ fn inspect_plugin(path: &Path) -> Result<()> {
             println!("  {}", p.description);
         }
         println!("  features:    {}", p.features.join(", "));
-        println!("  audio ports: in {:?} out {:?} (channels per port)", p.audio_inputs, p.audio_outputs);
+        println!(
+            "  audio ports: in {:?} out {:?} (channels per port)",
+            p.audio_inputs, p.audio_outputs
+        );
         println!("  parameters ({}):", p.params.len());
         for q in &p.params {
-            let module = if q.module.is_empty() { String::new() } else { format!("  [{}]", q.module) };
-            println!("    id={:<6} {:<28} range {} .. {}  default {}{}", q.id, q.name, q.min, q.max, q.default, module);
+            let module = if q.module.is_empty() {
+                String::new()
+            } else {
+                format!("  [{}]", q.module)
+            };
+            println!(
+                "    id={:<6} {:<28} range {} .. {}  default {}{}",
+                q.id, q.name, q.min, q.max, q.default, module
+            );
         }
     }
     Ok(())

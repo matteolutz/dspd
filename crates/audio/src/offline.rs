@@ -20,7 +20,8 @@ pub struct WavInfo {
 
 /// Read just the header of a WAV file.
 pub fn probe_wav(path: &Path) -> Result<WavInfo> {
-    let reader = WavReader::open(path).with_context(|| format!("cannot open {}", path.display()))?;
+    let reader =
+        WavReader::open(path).with_context(|| format!("cannot open {}", path.display()))?;
     let spec = reader.spec();
     Ok(WavInfo {
         sample_rate: spec.sample_rate,
@@ -42,7 +43,12 @@ pub struct OfflineBackend {
 impl OfflineBackend {
     /// * `out_channels` must equal the chain's channel count.
     /// * `block_size` must not exceed the session's `max_block`.
-    pub fn new(input: impl Into<PathBuf>, output: impl Into<PathBuf>, out_channels: usize, block_size: usize) -> Self {
+    pub fn new(
+        input: impl Into<PathBuf>,
+        output: impl Into<PathBuf>,
+        out_channels: usize,
+        block_size: usize,
+    ) -> Self {
         Self {
             input: input.into(),
             output: output.into(),
@@ -70,29 +76,44 @@ impl OfflineBackend {
 }
 
 /// Streams a WAV file as f32 samples regardless of its on-disk format.
-fn sample_stream(reader: WavReader<std::io::BufReader<std::fs::File>>) -> Result<Box<dyn Iterator<Item = hound::Result<f32>>>> {
+fn sample_stream(
+    reader: WavReader<std::io::BufReader<std::fs::File>>,
+) -> Result<Box<dyn Iterator<Item = hound::Result<f32>>>> {
     let spec = reader.spec();
     Ok(match (spec.sample_format, spec.bits_per_sample) {
         (SampleFormat::Float, 32) => Box::new(reader.into_samples::<f32>()),
         (SampleFormat::Int, bits @ 1..=32) => {
             let scale = 1.0 / (1u64 << (bits - 1)) as f32;
-            Box::new(reader.into_samples::<i32>().map(move |s| s.map(|v| v as f32 * scale)))
+            Box::new(
+                reader
+                    .into_samples::<i32>()
+                    .map(move |s| s.map(|v| v as f32 * scale)),
+            )
         }
         (fmt, bits) => bail!("unsupported WAV sample format: {fmt:?} {bits}-bit"),
     })
 }
 
 impl AudioBackend for OfflineBackend {
-    fn run(&mut self, mut processor: Box<dyn Processor + Send>, stop: Arc<AtomicBool>) -> Result<RunReport> {
+    fn run(
+        &mut self,
+        mut processor: Box<dyn Processor + Send>,
+        stop: Arc<AtomicBool>,
+    ) -> Result<RunReport> {
         let started = Instant::now();
 
-        let reader = WavReader::open(&self.input).with_context(|| format!("cannot open {}", self.input.display()))?;
+        let reader = WavReader::open(&self.input)
+            .with_context(|| format!("cannot open {}", self.input.display()))?;
         let in_spec = reader.spec();
         let in_channels = in_spec.channels as usize;
         let in_frames = u64::from(reader.duration());
         let mut samples = sample_stream(reader)?;
 
-        let latency = if self.compensate_latency { u64::from(processor.latency_frames()) } else { 0 };
+        let latency = if self.compensate_latency {
+            u64::from(processor.latency_frames())
+        } else {
+            0
+        };
         let total_frames = in_frames + self.tail_frames + latency;
         let mut to_skip = latency;
 
@@ -151,7 +172,9 @@ impl AudioBackend for OfflineBackend {
                     continue;
                 }
                 for c in 0..self.out_channels {
-                    writer.write_sample(output.channel(c)[f]).context("error writing WAV data")?;
+                    writer
+                        .write_sample(output.channel(c)[f])
+                        .context("error writing WAV data")?;
                 }
                 report.frames_out += 1;
             }
@@ -172,7 +195,12 @@ mod tests {
     fn write_wav(path: &Path, channels: u16, frames: usize, value: i16) {
         let mut w = WavWriter::create(
             path,
-            WavSpec { channels, sample_rate: 44_100, bits_per_sample: 16, sample_format: SampleFormat::Int },
+            WavSpec {
+                channels,
+                sample_rate: 44_100,
+                bits_per_sample: 16,
+                sample_format: SampleFormat::Int,
+            },
         )
         .unwrap();
         for _ in 0..frames * channels as usize {
@@ -195,15 +223,25 @@ mod tests {
 
         let mut backend = OfflineBackend::new(&i, &o, 2, 128);
         let report = backend
-            .run(Box::new(Gain::new(-6.0206)), Arc::new(AtomicBool::new(false)))
+            .run(
+                Box::new(Gain::new(-6.0206)),
+                Arc::new(AtomicBool::new(false)),
+            )
             .unwrap();
         assert_eq!(report.frames_in, 1000);
         assert_eq!(report.frames_out, 1000);
 
         let (spec, data) = read_all(&o);
-        assert_eq!((spec.channels, spec.sample_rate, spec.bits_per_sample), (2, 44_100, 32));
+        assert_eq!(
+            (spec.channels, spec.sample_rate, spec.bits_per_sample),
+            (2, 44_100, 32)
+        );
         assert_eq!(data.len(), 2000);
-        assert!(data.iter().all(|s| (s - 0.25).abs() < 1e-3), "{:?}", &data[..4]);
+        assert!(
+            data.iter().all(|s| (s - 0.25).abs() < 1e-3),
+            "{:?}",
+            &data[..4]
+        );
     }
 
     #[test]
@@ -212,7 +250,9 @@ mod tests {
         let (i, o) = (dir.path().join("in.wav"), dir.path().join("out.wav"));
         write_wav(&i, 1, 100, 8192);
         let mut backend = OfflineBackend::new(&i, &o, 1, 64).tail_frames(50);
-        let report = backend.run(Box::new(Gain::new(0.0)), Arc::new(AtomicBool::new(false))).unwrap();
+        let report = backend
+            .run(Box::new(Gain::new(0.0)), Arc::new(AtomicBool::new(false)))
+            .unwrap();
         assert_eq!(report.frames_out, 150);
         let (_, data) = read_all(&o);
         assert!(data[..100].iter().all(|s| *s > 0.2));
@@ -225,7 +265,9 @@ mod tests {
         let (i, o) = (dir.path().join("in.wav"), dir.path().join("out.wav"));
         write_wav(&i, 1, 10, 16384);
         let mut backend = OfflineBackend::new(&i, &o, 2, 8);
-        backend.run(Box::new(Gain::new(0.0)), Arc::new(AtomicBool::new(false))).unwrap();
+        backend
+            .run(Box::new(Gain::new(0.0)), Arc::new(AtomicBool::new(false)))
+            .unwrap();
         let (spec, data) = read_all(&o);
         assert_eq!(spec.channels, 2);
         assert_eq!(data.len(), 20);
@@ -233,9 +275,15 @@ mod tests {
 
     struct Delay(u32);
     impl Processor for Delay {
-        fn name(&self) -> &str { "delay" }
-        fn process(&mut self, input: &AudioBlock, output: &mut AudioBlock) { output.copy_from(input) }
-        fn latency_frames(&self) -> u32 { self.0 }
+        fn name(&self) -> &str {
+            "delay"
+        }
+        fn process(&mut self, input: &AudioBlock, output: &mut AudioBlock) {
+            output.copy_from(input)
+        }
+        fn latency_frames(&self) -> u32 {
+            self.0
+        }
     }
 
     #[test]
@@ -244,7 +292,9 @@ mod tests {
         let (i, o) = (dir.path().join("in.wav"), dir.path().join("out.wav"));
         write_wav(&i, 1, 300, 1000);
         let mut backend = OfflineBackend::new(&i, &o, 1, 64);
-        let report = backend.run(Box::new(Delay(37)), Arc::new(AtomicBool::new(false))).unwrap();
+        let report = backend
+            .run(Box::new(Delay(37)), Arc::new(AtomicBool::new(false)))
+            .unwrap();
         assert_eq!(report.frames_out, 300);
     }
 }

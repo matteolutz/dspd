@@ -77,6 +77,16 @@ impl Engine {
     pub fn rack(&self) -> &Rack {
         &self.rack
     }
+
+    /// Shared bank of live meter values (see [`crate::MeterBank`]).
+    pub fn meters(&self) -> Arc<crate::MeterBank> {
+        Arc::clone(self.rack.meters())
+    }
+
+    /// What each slot of the meter bank is.
+    pub fn meter_infos(&self) -> Arc<[crate::MeterInfo]> {
+        Arc::clone(self.rack.meter_infos())
+    }
 }
 
 impl Processor for Engine {
@@ -88,7 +98,8 @@ impl Processor for Engine {
         let start = Instant::now();
 
         while let Some(ev) = self.params.pop() {
-            self.rack.set_param(ev.strip as usize, ev.stage as usize, ev.param_id, ev.value);
+            self.rack
+                .set_param(ev.strip as usize, ev.stage as usize, ev.param_id, ev.value);
         }
         self.rack.process(input, output);
 
@@ -99,7 +110,9 @@ impl Processor for Engine {
         self.stats.blocks.fetch_add(1, Ordering::Relaxed);
         self.stats.frames.fetch_add(frames, Ordering::Relaxed);
         self.stats.total_ns.fetch_add(elapsed_ns, Ordering::Relaxed);
-        self.stats.max_block_ns.fetch_max(elapsed_ns, Ordering::Relaxed);
+        self.stats
+            .max_block_ns
+            .fetch_max(elapsed_ns, Ordering::Relaxed);
         if elapsed_ns > deadline_ns {
             self.stats.overruns.fetch_add(1, Ordering::Relaxed);
         }
@@ -128,7 +141,13 @@ mod tests {
         );
         let rack = Rack::new(vec![Strip::new("s", 0, 0, chain)]);
         let mut engine = Engine::new(rack, rx, 48_000);
-        tx.send(ParamEvent { strip: 0, stage: 0, param_id: 0, value: -120.0 }).unwrap();
+        tx.send(ParamEvent {
+            strip: 0,
+            stage: 0,
+            param_id: 0,
+            value: -120.0,
+        })
+        .unwrap();
 
         let mut input = AudioBlock::new(1, 64);
         input.channel_mut(0).fill(1.0);

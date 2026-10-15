@@ -30,11 +30,16 @@ pub fn apply_to_current_thread(cfg: &RtConfig) -> Result<(), String> {
             libc::CPU_ZERO(&mut set);
             libc::CPU_SET(cpu, &mut set);
             if libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set) != 0 {
-                return Err(format!("pinning to CPU {cpu} failed: {}", Error::last_os_error()));
+                return Err(format!(
+                    "pinning to CPU {cpu} failed: {}",
+                    Error::last_os_error()
+                ));
             }
         }
         if let Some(priority) = cfg.priority {
-            let param = libc::sched_param { sched_priority: priority };
+            let param = libc::sched_param {
+                sched_priority: priority,
+            };
             if libc::sched_setscheduler(0, libc::SCHED_FIFO, &param) != 0 {
                 return Err(format!(
                     "SCHED_FIFO priority {priority} failed: {} (needs root, CAP_SYS_NICE or an rtprio limit)",
@@ -56,7 +61,10 @@ pub fn apply_to_current_thread(_cfg: &RtConfig) -> Result<(), String> {
 pub fn lock_memory() -> Result<(), String> {
     // SAFETY: mlockall has no memory-safety preconditions.
     if unsafe { libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE) } != 0 {
-        return Err(format!("mlockall failed: {}", std::io::Error::last_os_error()));
+        return Err(format!(
+            "mlockall failed: {}",
+            std::io::Error::last_os_error()
+        ));
     }
     Ok(())
 }
@@ -76,7 +84,10 @@ pub struct AudioThreadInit {
 
 impl AudioThreadInit {
     pub fn new(inner: Box<dyn Processor + Send>, cfg: RtConfig) -> Self {
-        Self { inner, pending: (!cfg.is_noop()).then_some(cfg) }
+        Self {
+            inner,
+            pending: (!cfg.is_noop()).then_some(cfg),
+        }
     }
 }
 

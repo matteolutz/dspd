@@ -28,7 +28,9 @@ use clap_sys::host::clap_host;
 use clap_sys::id::{clap_id, CLAP_INVALID_ID};
 use clap_sys::plugin::{clap_plugin, clap_plugin_descriptor};
 use clap_sys::plugin_features::CLAP_PLUGIN_FEATURE_AUDIO_EFFECT;
-use clap_sys::process::{clap_process, clap_process_status, CLAP_PROCESS_CONTINUE, CLAP_PROCESS_ERROR};
+use clap_sys::process::{
+    clap_process, clap_process_status, CLAP_PROCESS_CONTINUE, CLAP_PROCESS_ERROR,
+};
 use clap_sys::version::CLAP_VERSION;
 
 const PLUGIN_ID: &CStr = c"dev.dspd.test-gain";
@@ -45,7 +47,8 @@ struct FeatureList([*const c_char; 2]);
 // SAFETY: the pointers refer to immutable 'static C strings.
 unsafe impl Sync for FeatureList {}
 
-static FEATURES: FeatureList = FeatureList([CLAP_PLUGIN_FEATURE_AUDIO_EFFECT.as_ptr(), ptr::null()]);
+static FEATURES: FeatureList =
+    FeatureList([CLAP_PLUGIN_FEATURE_AUDIO_EFFECT.as_ptr(), ptr::null()]);
 
 static DESCRIPTOR: clap_plugin_descriptor = clap_plugin_descriptor {
     clap_version: CLAP_VERSION,
@@ -103,7 +106,12 @@ unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
     drop(Box::from_raw((*plugin).plugin_data as *mut Instance));
 }
 
-unsafe extern "C" fn plugin_activate(_p: *const clap_plugin, _sr: f64, _min: u32, _max: u32) -> bool {
+unsafe extern "C" fn plugin_activate(
+    _p: *const clap_plugin,
+    _sr: f64,
+    _min: u32,
+    _max: u32,
+) -> bool {
     true
 }
 
@@ -167,7 +175,10 @@ unsafe extern "C" fn plugin_process(
     CLAP_PROCESS_CONTINUE
 }
 
-unsafe extern "C" fn plugin_get_extension(_plugin: *const clap_plugin, id: *const c_char) -> *const c_void {
+unsafe extern "C" fn plugin_get_extension(
+    _plugin: *const clap_plugin,
+    id: *const c_char,
+) -> *const c_void {
     if id.is_null() {
         return ptr::null();
     }
@@ -197,7 +208,11 @@ unsafe extern "C" fn params_count(_plugin: *const clap_plugin) -> u32 {
     1
 }
 
-unsafe extern "C" fn params_get_info(_p: *const clap_plugin, index: u32, info: *mut clap_param_info) -> bool {
+unsafe extern "C" fn params_get_info(
+    _p: *const clap_plugin,
+    index: u32,
+    info: *mut clap_param_info,
+) -> bool {
     if index != 0 || info.is_null() {
         return false;
     }
@@ -214,7 +229,11 @@ unsafe extern "C" fn params_get_info(_p: *const clap_plugin, index: u32, info: *
     true
 }
 
-unsafe extern "C" fn params_get_value(plugin: *const clap_plugin, id: clap_id, out: *mut f64) -> bool {
+unsafe extern "C" fn params_get_value(
+    plugin: *const clap_plugin,
+    id: clap_id,
+    out: *mut f64,
+) -> bool {
     if id != PARAM_GAIN || out.is_null() {
         return false;
     }
@@ -233,7 +252,10 @@ unsafe extern "C" fn params_value_to_text(
         return false;
     }
     let text = format!("{value:.1} dB");
-    write_cstr(std::slice::from_raw_parts_mut(buf, capacity as usize), &text);
+    write_cstr(
+        std::slice::from_raw_parts_mut(buf, capacity as usize),
+        &text,
+    );
     true
 }
 

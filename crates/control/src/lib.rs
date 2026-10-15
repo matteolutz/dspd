@@ -87,24 +87,46 @@ async fn get_stats(State(s): State<Shared>) -> Json<StatsSnapshot> {
     Json(s.stats.snapshot(s.sample_rate))
 }
 
-async fn set_param(State(s): State<Shared>, Json(req): Json<ParamRequest>) -> Result<(StatusCode, Json<Value>), ApiError> {
+async fn set_param(
+    State(s): State<Shared>,
+    Json(req): Json<ParamRequest>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
     if !req.value.is_finite() {
-        return Err(error(StatusCode::BAD_REQUEST, "value must be a finite number"));
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "value must be a finite number",
+        ));
     }
     let mut session = lock(&s.session);
 
     // Validate against a copy so a rejected change leaves the session untouched.
     let mut candidate = session.clone();
-    if !candidate.apply_param(req.strip as usize, req.stage as usize, req.param_id, req.value) {
+    if !candidate.apply_param(
+        req.strip as usize,
+        req.stage as usize,
+        req.param_id,
+        req.value,
+    ) {
         return Err(error(
             StatusCode::NOT_FOUND,
-            format!("no strip {} stage {} with parameter {}", req.strip, req.stage, req.param_id),
+            format!(
+                "no strip {} stage {} with parameter {}",
+                req.strip, req.stage, req.param_id
+            ),
         ));
     }
 
-    let event = ParamEvent { strip: req.strip, stage: req.stage, param_id: req.param_id, value: req.value };
+    let event = ParamEvent {
+        strip: req.strip,
+        stage: req.stage,
+        param_id: req.param_id,
+        value: req.value,
+    };
     if lock(&s.params).send(event).is_err() {
-        return Err(error(StatusCode::SERVICE_UNAVAILABLE, "parameter queue is full; retry"));
+        return Err(error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "parameter queue is full; retry",
+        ));
     }
     *session = candidate;
     Ok((StatusCode::ACCEPTED, Json(json!({ "status": "queued" }))))
@@ -112,12 +134,18 @@ async fn set_param(State(s): State<Shared>, Json(req): Json<ParamRequest>) -> Re
 
 async fn save_session(State(s): State<Shared>) -> Result<Json<Value>, ApiError> {
     let Some(path) = &s.session_path else {
-        return Err(error(StatusCode::CONFLICT, "server was started without a session file path"));
+        return Err(error(
+            StatusCode::CONFLICT,
+            "server was started without a session file path",
+        ));
     };
     let session = lock(&s.session).clone();
-    session
-        .save(path)
-        .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, format!("saving session failed: {e}")))?;
+    session.save(path).map_err(|e| {
+        error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("saving session failed: {e}"),
+        )
+    })?;
     Ok(Json(json!({ "status": "saved", "path": path })))
 }
 
@@ -164,10 +192,23 @@ mod tests {
             outputs: None,
             strips: vec![strip(0, Width::Mono), strip(1, Width::Stereo)],
         };
-        (Arc::new(ControlState::new(tx, spec, Arc::new(EngineStats::default()), path)), rx)
+        (
+            Arc::new(ControlState::new(
+                tx,
+                spec,
+                Arc::new(EngineStats::default()),
+                path,
+            )),
+            rx,
+        )
     }
 
-    async fn call(state: &Shared, method: Method, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+    async fn call(
+        state: &Shared,
+        method: Method,
+        uri: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
         let mut req = Request::builder().method(method).uri(uri);
         let body = match body {
             Some(v) => {
@@ -176,16 +217,25 @@ mod tests {
             }
             None => Body::empty(),
         };
-        let resp = router(Arc::clone(state)).oneshot(req.body(body).unwrap()).await.unwrap();
+        let resp = router(Arc::clone(state))
+            .oneshot(req.body(body).unwrap())
+            .await
+            .unwrap();
         let status = resp.status();
         let bytes = to_bytes(resp.into_body(), 1 << 20).await.unwrap();
-        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
     }
 
     #[tokio::test]
     async fn health_and_stats() {
         let (state, _rx) = setup(None);
-        assert_eq!(call(&state, Method::GET, "/health", None).await, (StatusCode::OK, json!({"status": "ok"})));
+        assert_eq!(
+            call(&state, Method::GET, "/health", None).await,
+            (StatusCode::OK, json!({"status": "ok"}))
+        );
         let (status, stats) = call(&state, Method::GET, "/stats", None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(stats["blocks"], 0);
@@ -198,7 +248,15 @@ mod tests {
         let body = json!({"strip": 1, "stage": 0, "param_id": 0, "value": -12.5});
         let (status, _) = call(&state, Method::POST, "/params", Some(body)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
-        assert_eq!(rx.pop(), Some(ParamEvent { strip: 1, stage: 0, param_id: 0, value: -12.5 }));
+        assert_eq!(
+            rx.pop(),
+            Some(ParamEvent {
+                strip: 1,
+                stage: 0,
+                param_id: 0,
+                value: -12.5
+            })
+        );
 
         // Only the addressed strip changes in the session.
         let (_, session) = call(&state, Method::GET, "/session", None).await;
@@ -234,10 +292,16 @@ mod tests {
         let (state, _rx) = setup(None); // capacity 2, never drained
         for _ in 0..2 {
             let b = json!({"strip": 0, "stage": 0, "param_id": 0, "value": -1.0});
-            assert_eq!(call(&state, Method::POST, "/params", Some(b)).await.0, StatusCode::ACCEPTED);
+            assert_eq!(
+                call(&state, Method::POST, "/params", Some(b)).await.0,
+                StatusCode::ACCEPTED
+            );
         }
         let b = json!({"strip": 0, "stage": 0, "param_id": 0, "value": -99.0});
-        assert_eq!(call(&state, Method::POST, "/params", Some(b)).await.0, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            call(&state, Method::POST, "/params", Some(b)).await.0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
         let (_, session) = call(&state, Method::GET, "/session", None).await;
         assert_eq!(session["strips"][0]["chain"][0]["gain_db"], -1.0);
     }
@@ -245,14 +309,20 @@ mod tests {
     #[tokio::test]
     async fn save_requires_configured_path_and_writes_live_state() {
         let (state, _rx) = setup(None);
-        assert_eq!(call(&state, Method::POST, "/session/save", None).await.0, StatusCode::CONFLICT);
+        assert_eq!(
+            call(&state, Method::POST, "/session/save", None).await.0,
+            StatusCode::CONFLICT
+        );
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("saved.json");
         let (state, _rx) = setup(Some(path.clone()));
         let b = json!({"strip": 0, "stage": 0, "param_id": 0, "value": -3.0});
         call(&state, Method::POST, "/params", Some(b)).await;
-        assert_eq!(call(&state, Method::POST, "/session/save", None).await.0, StatusCode::OK);
+        assert_eq!(
+            call(&state, Method::POST, "/session/save", None).await.0,
+            StatusCode::OK
+        );
 
         let saved = SessionSpec::load(&path).unwrap();
         match &saved.strips[0].chain[0] {

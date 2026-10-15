@@ -1,4 +1,4 @@
-use crate::{AudioBlock, BoxedProcessor, Processor};
+use crate::{AudioBlock, BoxedProcessor, MeterSpec, MeterWriter, Processor};
 
 /// Runs two instances of a mono processor as one stereo processor.
 ///
@@ -40,11 +40,18 @@ impl Processor for DualMono {
         // A mono input block is fed to both sides, like a stereo one with L == R.
         let right_src = if input.num_channels() > 1 { 1 } else { 0 };
 
-        for b in [&mut self.in_l, &mut self.in_r, &mut self.out_l, &mut self.out_r] {
+        for b in [
+            &mut self.in_l,
+            &mut self.in_r,
+            &mut self.out_l,
+            &mut self.out_r,
+        ] {
             b.set_frames(n);
         }
         self.in_l.channel_mut(0).copy_from_slice(input.channel(0));
-        self.in_r.channel_mut(0).copy_from_slice(input.channel(right_src));
+        self.in_r
+            .channel_mut(0)
+            .copy_from_slice(input.channel(right_src));
 
         self.left.process(&self.in_l, &mut self.out_l);
         self.right.process(&self.in_r, &mut self.out_r);
@@ -64,6 +71,30 @@ impl Processor for DualMono {
         self.left.set_param(id, value);
         self.right.set_param(id, value);
     }
+
+    /// Both instances report their own values: all of the left side's meters
+    /// (named "... L"), then all of the right side's ("... R").
+    fn meter_specs(&self) -> Vec<MeterSpec> {
+        let side = |specs: Vec<MeterSpec>, tag: &str| -> Vec<MeterSpec> {
+            specs
+                .into_iter()
+                .map(|s| MeterSpec {
+                    param_id: s.param_id,
+                    name: format!("{} {tag}", s.name),
+                })
+                .collect()
+        };
+        let mut all = side(self.left.meter_specs(), "L");
+        all.extend(side(self.right.meter_specs(), "R"));
+        all
+    }
+
+    fn attach_meters(&mut self, writer: MeterWriter) {
+        let left = self.left.meter_specs().len();
+        let right = self.right.meter_specs().len();
+        self.left.attach_meters(writer.slice(0, left));
+        self.right.attach_meters(writer.slice(left, right));
+    }
 }
 
 #[cfg(test)]
@@ -73,7 +104,11 @@ mod tests {
 
     #[test]
     fn left_and_right_stay_independent() {
-        let mut dm = DualMono::new(Box::new(Gain::new(-6.0206)), Box::new(Gain::new(-6.0206)), 16);
+        let mut dm = DualMono::new(
+            Box::new(Gain::new(-6.0206)),
+            Box::new(Gain::new(-6.0206)),
+            16,
+        );
         let mut input = AudioBlock::new(2, 16);
         input.channel_mut(0).fill(1.0);
         input.channel_mut(1).fill(0.25);
@@ -93,7 +128,11 @@ mod tests {
         let mut output = AudioBlock::new(2, 8);
         dm.process(&input, &mut output); // ramp
         dm.process(&input, &mut output);
-        assert!(output.channel(0).iter().chain(output.channel(1)).all(|s| s.abs() < 1e-3));
+        assert!(output
+            .channel(0)
+            .iter()
+            .chain(output.channel(1))
+            .all(|s| s.abs() < 1e-3));
     }
 
     #[test]

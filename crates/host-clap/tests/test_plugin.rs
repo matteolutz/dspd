@@ -12,19 +12,29 @@ fn build_test_plugin(dest: &Path) -> PathBuf {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let out = Command::new(cargo)
         .current_dir(&root)
-        .args(["build", "-p", "dspd-test-plugin", "--message-format=json-render-diagnostics"])
+        .args([
+            "build",
+            "-p",
+            "dspd-test-plugin",
+            "--message-format=json-render-diagnostics",
+        ])
         .output()
         .expect("failed to run cargo");
     assert!(out.status.success(), "building test plugin failed");
 
     for line in String::from_utf8_lossy(&out.stdout).lines() {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
         if v["reason"] != "compiler-artifact" || v["target"]["name"] != "dspd_test_plugin" {
             continue;
         }
         for f in v["filenames"].as_array().into_iter().flatten() {
             let f = Path::new(f.as_str().unwrap());
-            if matches!(f.extension().and_then(|e| e.to_str()), Some("so" | "dll" | "dylib")) {
+            if matches!(
+                f.extension().and_then(|e| e.to_str()),
+                Some("so" | "dll" | "dylib")
+            ) {
                 let target = dest.join("test-gain.clap");
                 std::fs::copy(f, &target).unwrap();
                 return target;
@@ -50,7 +60,10 @@ fn inspect_lists_plugin_and_params() {
     assert_eq!(plugins.len(), 2);
     let m = &plugins[1];
     assert_eq!(m.id, "dev.dspd.test-gain-mono");
-    assert_eq!((m.audio_inputs.clone(), m.audio_outputs.clone()), (vec![1], vec![1]));
+    assert_eq!(
+        (m.audio_inputs.clone(), m.audio_outputs.clone()),
+        (vec![1], vec![1])
+    );
     let p = &plugins[0];
     assert_eq!(p.id, "dev.dspd.test-gain");
     assert_eq!(p.name, "dspd Test Gain");
@@ -83,7 +96,11 @@ fn processes_audio_and_applies_params() {
     plugin.set_param(0, -6.0206);
     plugin.process(&input, &mut output);
     for c in 0..2 {
-        assert!(output.channel(c).iter().all(|&s| (s - 0.5).abs() < 1e-4), "ch {c}: {:?}", &output.channel(c)[..4]);
+        assert!(
+            output.channel(c).iter().all(|&s| (s - 0.5).abs() < 1e-4),
+            "ch {c}: {:?}",
+            &output.channel(c)[..4]
+        );
     }
 
     // The value sticks across blocks without being re-sent.
@@ -122,11 +139,14 @@ fn many_instances_share_one_loaded_library() {
     // Keep our own handle to the same library so the plugin's counters stay readable
     // after the host has dropped everything.
     let lib = unsafe { libloading::Library::new(&path) }.unwrap();
-    let inits: libloading::Symbol<extern "C" fn() -> u32> = unsafe { lib.get(b"dspd_test_entry_init_count\0") }.unwrap();
-    let deinits: libloading::Symbol<extern "C" fn() -> u32> = unsafe { lib.get(b"dspd_test_entry_deinit_count\0") }.unwrap();
+    let inits: libloading::Symbol<extern "C" fn() -> u32> =
+        unsafe { lib.get(b"dspd_test_entry_init_count\0") }.unwrap();
+    let deinits: libloading::Symbol<extern "C" fn() -> u32> =
+        unsafe { lib.get(b"dspd_test_entry_deinit_count\0") }.unwrap();
 
-    let mut plugins: Vec<ClapProcessor> =
-        (0..32).map(|_| ClapProcessor::load(&path, None, 48_000.0, 64).unwrap()).collect();
+    let mut plugins: Vec<ClapProcessor> = (0..32)
+        .map(|_| ClapProcessor::load(&path, None, 48_000.0, 64).unwrap())
+        .collect();
     assert_eq!(inits(), 1, "init must run once for 32 instances");
     assert_eq!(deinits(), 0);
 
@@ -143,7 +163,11 @@ fn many_instances_share_one_loaded_library() {
     }
 
     drop(plugins);
-    assert_eq!(deinits(), 1, "deinit must run once, after the last instance is gone");
+    assert_eq!(
+        deinits(),
+        1,
+        "deinit must run once, after the last instance is gone"
+    );
 
     // Loading again afterwards starts a fresh init.
     let again = ClapProcessor::load(&path, None, 48_000.0, 64).unwrap();
@@ -155,8 +179,12 @@ fn many_instances_share_one_loaded_library() {
 fn mono_plugin_reports_one_channel_and_works_on_a_mono_block() {
     let dir = tempfile::tempdir().unwrap();
     let path = build_test_plugin(dir.path());
-    let mut plugin = ClapProcessor::load(&path, Some("dev.dspd.test-gain-mono"), 48_000.0, 32).unwrap();
-    assert_eq!((plugin.main_input_channels(), plugin.main_output_channels()), (1, 1));
+    let mut plugin =
+        ClapProcessor::load(&path, Some("dev.dspd.test-gain-mono"), 48_000.0, 32).unwrap();
+    assert_eq!(
+        (plugin.main_input_channels(), plugin.main_output_channels()),
+        (1, 1)
+    );
     plugin.set_param(0, -6.0206);
     let mut input = AudioBlock::new(1, 16);
     input.channel_mut(0).fill(1.0);

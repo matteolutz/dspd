@@ -17,7 +17,10 @@ fn db_to_linear(db: f64) -> f32 {
 impl Gain {
     pub fn new(gain_db: f32) -> Self {
         let g = db_to_linear(gain_db as f64);
-        Self { current: g, target: g }
+        Self {
+            current: g,
+            target: g,
+        }
     }
 }
 

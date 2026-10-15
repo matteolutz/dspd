@@ -12,9 +12,10 @@ use clap_sys::events::{
 };
 use clap_sys::ext::latency::{clap_plugin_latency, CLAP_EXT_LATENCY};
 use clap_sys::process::{clap_process, CLAP_PROCESS_ERROR};
-use dspd_engine::{AudioBlock, Processor};
+use dspd_engine::{AudioBlock, MeterSpec, MeterWriter, Processor};
 
 use crate::entry::{read_cstr, Entry, PluginHandle};
+use crate::inspect::list_params;
 
 /// Parameter events waiting to be delivered with the next `process` call.
 /// Capacity is reserved up front so `set_param` never allocates.
@@ -30,16 +31,46 @@ unsafe extern "C" fn in_events_size(list: *const clap_input_events) -> u32 {
     q.events.len() as u32
 }
 
-unsafe extern "C" fn in_events_get(list: *const clap_input_events, index: u32) -> *const clap_event_header {
+unsafe extern "C" fn in_events_get(
+    list: *const clap_input_events,
+    index: u32,
+) -> *const clap_event_header {
     let q = &*((*list).ctx as *const EventQueue);
     q.events
         .get(index as usize)
         .map_or(ptr::null(), |e| &e.header as *const clap_event_header)
 }
 
-/// Plugins may emit events (parameter changes from their own UI, notes, ...).
-/// A headless server has nobody to forward them to, so they are accepted and dropped.
-unsafe extern "C" fn out_events_try_push(_list: *const clap_output_events, _event: *const clap_event_header) -> bool {
+/// Where the plugin's output events go. Read-only parameters (meters) are
+/// forwarded to the meter bank; everything else a plugin emits (notes, changes
+/// from its own UI) is accepted and dropped, since a headless server has nobody
+/// to show it to.
+struct OutState {
+    /// CLAP ids of the plugin's read-only parameters; index i is meter slot i.
+    ids: Vec<u32>,
+    writer: Option<MeterWriter>,
+}
+
+unsafe extern "C" fn out_events_try_push(
+    list: *const clap_output_events,
+    event: *const clap_event_header,
+) -> bool {
+    if list.is_null() || event.is_null() {
+        return true;
+    }
+    let header = &*event;
+    if header.space_id == CLAP_CORE_EVENT_SPACE_ID
+        && header.type_ == CLAP_EVENT_PARAM_VALUE
+        && header.size as usize >= std::mem::size_of::<clap_event_param_value>()
+    {
+        let state = &*((*list).ctx as *const OutState);
+        if let Some(writer) = &state.writer {
+            let ev = &*(event as *const clap_event_param_value);
+            if let Some(slot) = state.ids.iter().position(|&id| id == ev.param_id) {
+                writer.set(slot, ev.value as f32);
+            }
+        }
+    }
     true
 }
 
@@ -104,6 +135,8 @@ pub struct ClapProcessor {
     in_bufs: Vec<clap_audio_buffer>,
     out_bufs: Vec<clap_audio_buffer>,
     events: Box<EventQueue>,
+    out_state: Box<OutState>,
+    meter_names: Vec<String>,
     in_events: clap_input_events,
     out_events: clap_output_events,
     latency: u32,
@@ -123,7 +156,12 @@ unsafe impl Send for ClapProcessor {}
 impl ClapProcessor {
     /// Load `path`, instantiate `plugin_id` (or the first plugin in the file)
     /// and activate it for `sample_rate` and blocks of up to `max_frames`.
-    pub fn load(path: &Path, plugin_id: Option<&str>, sample_rate: f64, max_frames: usize) -> Result<Self> {
+    pub fn load(
+        path: &Path,
+        plugin_id: Option<&str>,
+        sample_rate: f64,
+        max_frames: usize,
+    ) -> Result<Self> {
         let entry = Entry::load(path)?;
         let id = match plugin_id {
             Some(id) => id.to_string(),
@@ -146,21 +184,39 @@ impl ClapProcessor {
 
         let name = unsafe { read_cstr((*(*handle.ptr()).desc).name) };
 
-        let mut events = Box::new(EventQueue {
+        // Read-only parameters are the plugin's outputs: they become meters.
+        let meters: Vec<_> = list_params(&handle)
+            .into_iter()
+            .filter(|p| p.is_readonly())
+            .collect();
+        let out_state = Box::new(OutState {
+            ids: meters.iter().map(|p| p.id).collect(),
+            writer: None,
+        });
+        let meter_names = meters.into_iter().map(|p| p.name).collect();
+
+        let events = Box::new(EventQueue {
             events: Vec::with_capacity(EVENT_CAPACITY),
             dropped: 0,
         });
-        let ctx = &mut *events as *mut EventQueue as *mut c_void;
 
         Ok(Self {
             name: if name.is_empty() { id } else { name },
-            in_ports: in_channels.iter().map(|&c| Port::new(c, max_frames)).collect(),
-            out_ports: out_channels.iter().map(|&c| Port::new(c, max_frames)).collect(),
+            in_ports: in_channels
+                .iter()
+                .map(|&c| Port::new(c, max_frames))
+                .collect(),
+            out_ports: out_channels
+                .iter()
+                .map(|&c| Port::new(c, max_frames))
+                .collect(),
             in_bufs: vec![empty_buffer(); in_channels.len()],
             out_bufs: vec![empty_buffer(); out_channels.len()],
             events,
+            out_state,
+            meter_names,
             in_events: clap_input_events {
-                ctx,
+                ctx: ptr::null_mut(),
                 size: Some(in_events_size),
                 get: Some(in_events_get),
             },
@@ -212,6 +268,11 @@ impl Processor for ClapProcessor {
             return;
         }
 
+        // Re-derive the callback contexts from the boxes on every call, so the pointers
+        // handed to the plugin always come from a fresh borrow of the data they point to.
+        self.in_events.ctx = &*self.events as *const EventQueue as *mut c_void;
+        self.out_events.ctx = &*self.out_state as *const OutState as *mut c_void;
+
         for (i, port) in self.in_ports.iter_mut().enumerate() {
             port.describe(frames, &mut self.in_bufs[i]);
         }
@@ -226,8 +287,16 @@ impl Processor for ClapProcessor {
             steady_time: self.steady_time,
             frames_count: frames as u32,
             transport: ptr::null(),
-            audio_inputs: if self.in_bufs.is_empty() { ptr::null() } else { self.in_bufs.as_ptr() },
-            audio_outputs: if self.out_bufs.is_empty() { ptr::null_mut() } else { self.out_bufs.as_mut_ptr() },
+            audio_inputs: if self.in_bufs.is_empty() {
+                ptr::null()
+            } else {
+                self.in_bufs.as_ptr()
+            },
+            audio_outputs: if self.out_bufs.is_empty() {
+                ptr::null_mut()
+            } else {
+                self.out_bufs.as_mut_ptr()
+            },
             audio_inputs_count: self.in_bufs.len() as u32,
             audio_outputs_count: self.out_bufs.len() as u32,
             in_events: &self.in_events,
@@ -279,5 +348,22 @@ impl Processor for ClapProcessor {
             key: -1,
             value,
         });
+    }
+
+    /// The plugin's read-only parameters, in the order the plugin lists them.
+    fn meter_specs(&self) -> Vec<MeterSpec> {
+        self.out_state
+            .ids
+            .iter()
+            .zip(&self.meter_names)
+            .map(|(&param_id, name)| MeterSpec {
+                param_id,
+                name: name.clone(),
+            })
+            .collect()
+    }
+
+    fn attach_meters(&mut self, writer: MeterWriter) {
+        self.out_state.writer = Some(writer);
     }
 }

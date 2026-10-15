@@ -47,5 +47,9 @@ pub trait AudioBackend {
     ///
     /// The processor is moved in because live backends hand it to a
     /// device callback thread.
-    fn run(&mut self, processor: Box<dyn Processor + Send>, stop: Arc<AtomicBool>) -> Result<RunReport>;
+    fn run(
+        &mut self,
+        processor: Box<dyn Processor + Send>,
+        stop: Arc<AtomicBool>,
+    ) -> Result<RunReport>;
 }

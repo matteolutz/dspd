@@ -9,14 +9,19 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap_sys::entry::clap_plugin_entry;
-use clap_sys::ext::audio_ports::{clap_audio_port_info, clap_plugin_audio_ports, CLAP_EXT_AUDIO_PORTS};
+use clap_sys::ext::audio_ports::{
+    clap_audio_port_info, clap_plugin_audio_ports, CLAP_EXT_AUDIO_PORTS,
+};
 use clap_sys::factory::plugin_factory::{clap_plugin_factory, CLAP_PLUGIN_FACTORY_ID};
 use clap_sys::host::clap_host;
 use clap_sys::plugin::{clap_plugin, clap_plugin_descriptor};
 use clap_sys::version::CLAP_VERSION;
 use libloading::{Library, Symbol};
 
-unsafe extern "C" fn host_get_extension(_host: *const clap_host, _id: *const c_char) -> *const c_void {
+unsafe extern "C" fn host_get_extension(
+    _host: *const clap_host,
+    _id: *const c_char,
+) -> *const c_void {
     // This host implements no optional host extensions yet (log, params,
     // latency, thread-check, ...). Plugins must cope with that.
     ptr::null()
@@ -92,15 +97,22 @@ impl EntryInner {
             if !init(path_c.as_ptr()) {
                 bail!("plugin entry init() failed for {}", path.display());
             }
-            let get_factory = e.get_factory.ok_or_else(|| anyhow!("entry has no get_factory()"))?;
-            let factory = get_factory(CLAP_PLUGIN_FACTORY_ID.as_ptr()) as *const clap_plugin_factory;
+            let get_factory = e
+                .get_factory
+                .ok_or_else(|| anyhow!("entry has no get_factory()"))?;
+            let factory =
+                get_factory(CLAP_PLUGIN_FACTORY_ID.as_ptr()) as *const clap_plugin_factory;
             if factory.is_null() {
                 if let Some(deinit) = e.deinit {
                     deinit();
                 }
                 bail!("{} exposes no plugin factory", path.display());
             }
-            Ok(Self { entry, factory, _lib: lib })
+            Ok(Self {
+                entry,
+                factory,
+                _lib: lib,
+            })
         }
     }
 
@@ -132,12 +144,17 @@ impl EntryInner {
     /// Create (but do not init) a plugin instance.
     pub fn create(&self, id: &str) -> Result<PluginHandle> {
         let id_c = CString::new(id).map_err(|_| anyhow!("plugin id contains a NUL byte"))?;
-        let create = unsafe { (*self.factory).create_plugin }.ok_or_else(|| anyhow!("factory has no create_plugin()"))?;
+        let create = unsafe { (*self.factory).create_plugin }
+            .ok_or_else(|| anyhow!("factory has no create_plugin()"))?;
         let ptr = unsafe { create(self.factory, &HOST, id_c.as_ptr()) };
         if ptr.is_null() {
             bail!("plugin `{id}` not found (or could not be created)");
         }
-        Ok(PluginHandle { ptr, activated: false, processing: false })
+        Ok(PluginHandle {
+            ptr,
+            activated: false,
+            processing: false,
+        })
     }
 }
 

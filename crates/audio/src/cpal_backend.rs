@@ -47,7 +47,11 @@ pub fn list_devices() -> Result<(Vec<String>, Vec<String>)> {
 
 fn find_device(host: &cpal::Host, name: Option<&str>, input: bool) -> Result<Option<Device>> {
     let Some(name) = name else {
-        return Ok(if input { host.default_input_device() } else { host.default_output_device() });
+        return Ok(if input {
+            host.default_input_device()
+        } else {
+            host.default_output_device()
+        });
     };
     let mut devices: Vec<Device> = if input {
         host.input_devices()?.collect()
@@ -55,17 +59,23 @@ fn find_device(host: &cpal::Host, name: Option<&str>, input: bool) -> Result<Opt
         host.output_devices()?.collect()
     };
     devices.retain(|d| d.name().is_ok_and(|n| n.contains(name)));
-    devices
-        .into_iter()
-        .next()
-        .map(Some)
-        .ok_or_else(|| anyhow!("no {} device matching `{name}`", if input { "input" } else { "output" }))
+    devices.into_iter().next().map(Some).ok_or_else(|| {
+        anyhow!(
+            "no {} device matching `{name}`",
+            if input { "input" } else { "output" }
+        )
+    })
 }
 
 impl CpalBackend {
     /// `in_channels` and `out_channels` are opened on the devices as asked; a
     /// device that cannot provide that many channels makes `run` fail.
-    pub fn new(in_channels: usize, out_channels: usize, block_size: usize, sample_rate: u32) -> Self {
+    pub fn new(
+        in_channels: usize,
+        out_channels: usize,
+        block_size: usize,
+        sample_rate: u32,
+    ) -> Self {
         Self {
             in_channels,
             out_channels,
@@ -97,11 +107,16 @@ impl CpalBackend {
 }
 
 impl AudioBackend for CpalBackend {
-    fn run(&mut self, mut processor: Box<dyn Processor + Send>, stop: Arc<AtomicBool>) -> Result<RunReport> {
+    fn run(
+        &mut self,
+        mut processor: Box<dyn Processor + Send>,
+        stop: Arc<AtomicBool>,
+    ) -> Result<RunReport> {
         let started = Instant::now();
         let host = cpal::default_host();
 
-        let out_dev = find_device(&host, self.output_device.as_deref(), false)?.context("no output device available")?;
+        let out_dev = find_device(&host, self.output_device.as_deref(), false)?
+            .context("no output device available")?;
         let out_config = StreamConfig {
             channels: self.out_channels as u16,
             sample_rate: SampleRate(self.sample_rate),
@@ -109,8 +124,16 @@ impl AudioBackend for CpalBackend {
         };
 
         // Input is optional: no device (or disabled) means the chain gets silence.
-        let in_dev = if self.use_input { find_device(&host, self.input_device.as_deref(), true)? } else { None };
-        let in_channels = if in_dev.is_some() { self.in_channels } else { 1 };
+        let in_dev = if self.use_input {
+            find_device(&host, self.input_device.as_deref(), true)?
+        } else {
+            None
+        };
+        let in_channels = if in_dev.is_some() {
+            self.in_channels
+        } else {
+            1
+        };
 
         let errors = Arc::new(AtomicU64::new(0));
         let blocks = Arc::new(AtomicU64::new(0));
@@ -118,7 +141,8 @@ impl AudioBackend for CpalBackend {
 
         // Ring buffer between the input callback and the output callback:
         // room for about 16 blocks of interleaved samples.
-        let (mut producer, mut consumer) = rtrb::RingBuffer::<f32>::new(self.block_size * in_channels * 16);
+        let (mut producer, mut consumer) =
+            rtrb::RingBuffer::<f32>::new(self.block_size * in_channels * 16);
 
         let in_stream = match &in_dev {
             Some(dev) => {
@@ -154,7 +178,11 @@ impl AudioBackend for CpalBackend {
         let block = self.block_size;
         let mut input = AudioBlock::new(in_channels, block);
         let mut output = AudioBlock::new(out_channels, block);
-        let (blocks_cb, frames_cb, errs) = (Arc::clone(&blocks), Arc::clone(&frames), Arc::clone(&errors));
+        let (blocks_cb, frames_cb, errs) = (
+            Arc::clone(&blocks),
+            Arc::clone(&frames),
+            Arc::clone(&errors),
+        );
 
         let out_stream = out_dev
             .build_output_stream(

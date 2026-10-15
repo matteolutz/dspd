@@ -3,7 +3,9 @@
 use std::path::Path;
 
 use anyhow::Result;
-use clap_sys::ext::params::{clap_param_info, clap_plugin_params, CLAP_EXT_PARAMS};
+use clap_sys::ext::params::{
+    clap_param_info, clap_plugin_params, CLAP_EXT_PARAMS, CLAP_PARAM_IS_READONLY,
+};
 
 use crate::entry::{read_cstr, Entry, PluginHandle};
 
@@ -16,6 +18,14 @@ pub struct ParamInfo {
     pub max: f64,
     pub default: f64,
     pub flags: u32,
+}
+
+impl ParamInfo {
+    /// Read-only parameters are outputs of the plugin (meters, gain reduction).
+    /// dspd publishes them as live meter values instead of letting you set them.
+    pub fn is_readonly(&self) -> bool {
+        self.flags & CLAP_PARAM_IS_READONLY != 0
+    }
 }
 
 #[derive(Clone, Debug)]

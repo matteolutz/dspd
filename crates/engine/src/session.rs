@@ -19,7 +19,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BoxedProcessor, Chain, Gain, Rack, Stage, Strip, GAIN_PARAM_DB};
+use crate::dyneq::DynamicEq;
+use crate::{BoxedProcessor, Chain, Gain, PeakMeter, Rack, Stage, Strip, GAIN_PARAM_DB};
 
 /// Upper bound on device channels in a session; guards against typos allocating gigabytes.
 pub const MAX_CHANNELS: usize = 1024;
@@ -94,13 +95,35 @@ impl StripSpec {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StageSpec {
     Gain(GainSpec),
+    DynEq(DynEqSpec),
     Clap(ClapSpec),
+
+    /// Pass-through that publishes the peak level in dBFS as a meter.
+    PeakMeter,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct GainSpec {
     #[serde(default)]
     pub gain_db: f32,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DynEqBandSpec {
+    pub freq: f32,
+    pub q: f32,
+    pub static_gain_db: f32,
+    pub threshold_db: f32,
+    pub ratio: f32,
+    pub range_db: f32,
+    pub attack_ms: f32,
+    pub release_ms: f32,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DynEqSpec {
+    #[serde(default)]
+    bands: Vec<DynEqBandSpec>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -129,9 +152,9 @@ where
     BTreeMap::<String, f64>::deserialize(deserializer)?
         .into_iter()
         .map(|(k, v)| {
-            k.parse::<u32>()
-                .map(|id| (id, v))
-                .map_err(|_| D::Error::custom(format!("parameter id `{k}` is not a non-negative integer")))
+            k.parse::<u32>().map(|id| (id, v)).map_err(|_| {
+                D::Error::custom(format!("parameter id `{k}` is not a non-negative integer"))
+            })
         })
         .collect()
 }
@@ -140,6 +163,8 @@ impl StageSpec {
     pub fn label(&self) -> String {
         match self {
             StageSpec::Gain(_) => "gain".to_string(),
+            StageSpec::DynEq(_) => "dyneq".to_string(),
+            StageSpec::PeakMeter => "peak_meter".to_string(),
             StageSpec::Clap(c) => c
                 .plugin_id
                 .clone()
@@ -172,7 +197,11 @@ impl SessionSpec {
 
     /// Smallest number of input channels that covers every strip.
     fn required_inputs(&self) -> usize {
-        self.strips.iter().map(|s| s.input + s.width.channels()).max().unwrap_or(0)
+        self.strips
+            .iter()
+            .map(|s| s.input + s.width.channels())
+            .max()
+            .unwrap_or(0)
     }
 
     /// Smallest number of output channels that covers every strip.
@@ -207,12 +236,18 @@ impl SessionSpec {
         }
         if let Some(n) = self.inputs {
             if n < self.required_inputs() {
-                return Err(format!("`inputs` is {n} but the strips read up to channel {}", self.required_inputs() - 1));
+                return Err(format!(
+                    "`inputs` is {n} but the strips read up to channel {}",
+                    self.required_inputs() - 1
+                ));
             }
         }
         if let Some(n) = self.outputs {
             if n < self.required_outputs() {
-                return Err(format!("`outputs` is {n} but the strips write up to channel {}", self.required_outputs() - 1));
+                return Err(format!(
+                    "`outputs` is {n} but the strips write up to channel {}",
+                    self.required_outputs() - 1
+                ));
             }
         }
         // Two strips on the same output channel would silently overwrite each other.
@@ -221,7 +256,9 @@ impl SessionSpec {
             for k in 0..s.width.channels() {
                 let ch = s.output_channel() + k;
                 if let Some(prev) = owner[ch] {
-                    return Err(format!("strips {prev} and {i} both write output channel {ch}"));
+                    return Err(format!(
+                        "strips {prev} and {i} both write output channel {ch}"
+                    ));
                 }
                 owner[ch] = Some(i);
             }
@@ -231,7 +268,11 @@ impl SessionSpec {
 
     /// Record a parameter change in the spec so that a later save/recall sees it.
     pub fn apply_param(&mut self, strip: usize, stage: usize, param_id: u32, value: f64) -> bool {
-        match self.strips.get_mut(strip).and_then(|s| s.chain.get_mut(stage)) {
+        match self
+            .strips
+            .get_mut(strip)
+            .and_then(|s| s.chain.get_mut(stage))
+        {
             Some(StageSpec::Gain(g)) if param_id == GAIN_PARAM_DB => {
                 g.gain_db = value as f32;
                 true
@@ -260,6 +301,12 @@ impl SessionSpec {
             for spec in &strip.chain {
                 let mut processor: BoxedProcessor = match spec {
                     StageSpec::Gain(g) => Box::new(Gain::new(g.gain_db)),
+                    StageSpec::DynEq(eq) => Box::new(DynamicEq::new_with_bands(
+                        self.sample_rate as f32,
+                        width,
+                        &eq.bands,
+                    )),
+                    StageSpec::PeakMeter => Box::new(PeakMeter::new(self.sample_rate)),
                     StageSpec::Clap(c) => load_clap(c, width)?,
                 };
                 if let StageSpec::Clap(c) = spec {
@@ -267,10 +314,18 @@ impl SessionSpec {
                         processor.set_param(*id, *value);
                     }
                 }
-                stages.push(Stage { label: spec.label(), processor });
+                stages.push(Stage {
+                    label: spec.label(),
+                    processor,
+                });
             }
             let chain = Chain::new(width, self.max_block, stages);
-            strips.push(Strip::new(strip.label(index), strip.input, strip.output_channel(), chain));
+            strips.push(Strip::new(
+                strip.label(index),
+                strip.input,
+                strip.output_channel(),
+                chain,
+            ));
         }
         Ok(Rack::new(strips))
     }
@@ -331,7 +386,10 @@ mod tests {
         spec.outputs = None;
 
         spec.strips[1].output = Some(0); // collides with the mono strip on channel 0
-        assert!(spec.validate().unwrap_err().contains("both write output channel 0"));
+        assert!(spec
+            .validate()
+            .unwrap_err()
+            .contains("both write output channel 0"));
         spec.strips[1].output = None;
 
         spec.strips[0].input = 5000;

@@ -9,7 +9,9 @@
 //! state, so a later scheduler can run them on several cores without changes
 //! to this data model.
 
-use crate::{AudioBlock, Chain, Processor};
+use std::sync::Arc;
+
+use crate::{AudioBlock, Chain, MeterBank, MeterInfo, MeterWriter, Processor};
 
 /// Fixed delay used to line up strips whose chains report different latencies.
 struct DelayLine {
@@ -20,7 +22,11 @@ struct DelayLine {
 
 impl DelayLine {
     fn new(channels: usize, frames: usize) -> Self {
-        Self { buf: vec![vec![0.0; frames]; channels], pos: 0, len: frames }
+        Self {
+            buf: vec![vec![0.0; frames]; channels],
+            pos: 0,
+            len: frames,
+        }
     }
 
     fn process(&mut self, block: &mut AudioBlock) {
@@ -103,18 +109,71 @@ impl Strip {
 pub struct Rack {
     strips: Vec<Strip>,
     latency: u32,
+
+    meters: Arc<MeterBank>,
+    meter_infos: Arc<[MeterInfo]>,
 }
 
 impl Rack {
     /// Build a rack and align all strips to the one with the highest latency,
     /// so every output channel is delayed by the same amount.
     pub fn new(mut strips: Vec<Strip>) -> Self {
-        let latency = strips.iter().map(Strip::chain_latency_frames).max().unwrap_or(0);
+        let latency = strips
+            .iter()
+            .map(Strip::chain_latency_frames)
+            .max()
+            .unwrap_or(0);
         for s in &mut strips {
             let extra = (latency - s.chain_latency_frames()) as usize;
             s.compensation = DelayLine::new(s.width(), extra);
         }
-        Self { strips, latency }
+
+        // Ask every stage which meters it has, allocate one bank for all of them,
+        // and hand each stage the writer for its own window.
+        let mut infos = Vec::new();
+        let mut windows = Vec::new(); // (strip, stage, first slot, count)
+        for (si, strip) in strips.iter().enumerate() {
+            for (ti, stage) in strip.chain.stages().iter().enumerate() {
+                let specs = stage.processor.meter_specs();
+                if specs.is_empty() {
+                    continue;
+                }
+                windows.push((si, ti, infos.len(), specs.len()));
+                for spec in specs {
+                    infos.push(MeterInfo {
+                        slot: infos.len(),
+                        strip: si,
+                        stage: ti,
+                        param_id: spec.param_id,
+                        name: spec.name,
+                    });
+                }
+            }
+        }
+        let meters = MeterBank::new(infos.len());
+        for (si, ti, base, len) in windows {
+            let writer = MeterWriter::new(Arc::clone(&meters), base, len);
+            strips[si].chain.stages_mut()[ti]
+                .processor
+                .attach_meters(writer);
+        }
+
+        Self {
+            strips,
+            latency,
+            meters,
+            meter_infos: infos.into(),
+        }
+    }
+
+    /// The bank all meters of this rack write into. Share it with the control side.
+    pub fn meters(&self) -> &Arc<MeterBank> {
+        &self.meters
+    }
+
+    /// What each slot of [`Rack::meters`] is: strip, stage, name.
+    pub fn meter_infos(&self) -> &Arc<[MeterInfo]> {
+        &self.meter_infos
     }
 
     pub fn strips(&self) -> &[Strip] {
@@ -159,7 +218,9 @@ impl Processor for Rack {
             for k in 0..s.out_block.num_channels() {
                 let dst = s.output + k;
                 if dst < output.num_channels() {
-                    output.channel_mut(dst).copy_from_slice(s.out_block.channel(k));
+                    output
+                        .channel_mut(dst)
+                        .copy_from_slice(s.out_block.channel(k));
                 }
             }
         }
@@ -177,7 +238,10 @@ mod tests {
     use crate::{Gain, Stage};
 
     fn strip(name: &str, width: usize, input: usize, output: usize, db: f32) -> Strip {
-        let stage = Stage { label: "g".into(), processor: Box::new(Gain::new(db)) };
+        let stage = Stage {
+            label: "g".into(),
+            processor: Box::new(Gain::new(db)),
+        };
         Strip::new(name, input, output, Chain::new(width, 64, vec![stage]))
     }
 
@@ -190,7 +254,11 @@ mod tests {
 
     impl Latent {
         fn new(n: u32, channels: usize) -> Self {
-            Self { n, ring: vec![vec![0.0; n.max(1) as usize]; channels], pos: 0 }
+            Self {
+                n,
+                ring: vec![vec![0.0; n.max(1) as usize]; channels],
+                pos: 0,
+            }
         }
     }
 
@@ -219,7 +287,9 @@ mod tests {
 
     #[test]
     fn thirty_two_mono_strips_are_independent() {
-        let strips = (0..32).map(|i| strip(&format!("s{i}"), 1, i, i, -(i as f32))).collect();
+        let strips = (0..32)
+            .map(|i| strip(&format!("s{i}"), 1, i, i, -(i as f32)))
+            .collect();
         let mut rack = Rack::new(strips);
 
         let mut input = AudioBlock::new(32, 16);
@@ -231,7 +301,10 @@ mod tests {
 
         for c in 0..32 {
             let want = 10f32.powf(-(c as f32) / 20.0);
-            assert!(output.channel(c).iter().all(|s| (s - want).abs() < 1e-4), "channel {c}");
+            assert!(
+                output.channel(c).iter().all(|s| (s - want).abs() < 1e-4),
+                "channel {c}"
+            );
         }
     }
 
@@ -251,7 +324,10 @@ mod tests {
 
         let expect = [0.05, 0.1, 0.15, 0.0];
         for (c, want) in expect.iter().enumerate() {
-            assert!(output.channel(c).iter().all(|s| (s - want).abs() < 1e-3), "channel {c}");
+            assert!(
+                output.channel(c).iter().all(|s| (s - want).abs() < 1e-3),
+                "channel {c}"
+            );
         }
     }
 
@@ -282,7 +358,14 @@ mod tests {
             "slow",
             0,
             0,
-            Chain::new(1, 64, vec![Stage { label: "l".into(), processor: Box::new(Latent::new(10, 1)) }]),
+            Chain::new(
+                1,
+                64,
+                vec![Stage {
+                    label: "l".into(),
+                    processor: Box::new(Latent::new(10, 1)),
+                }],
+            ),
         );
         let fast = strip("fast", 1, 1, 1, 0.0);
         let mut rack = Rack::new(vec![slow, fast]);
@@ -309,6 +392,58 @@ mod tests {
             let hit = heard.iter().position(|s| *s == 1.0);
             assert_eq!(hit, Some(10), "channel {c}: {heard:?}");
         }
+    }
+
+    #[test]
+    fn meters_are_collected_per_strip_and_stage() {
+        use crate::PeakMeter;
+        let metered = |name: &str, width: usize, input: usize, db: f32| {
+            let stages = vec![
+                Stage {
+                    label: "g".into(),
+                    processor: Box::new(Gain::new(db)),
+                },
+                Stage {
+                    label: "m".into(),
+                    processor: Box::new(PeakMeter::new(48_000)),
+                },
+            ];
+            Strip::new(name, input, input, Chain::new(width, 64, stages))
+        };
+        let plain = strip("plain", 1, 1, 1, 0.0); // no meter: contributes no slots
+        let mut rack = Rack::new(vec![
+            metered("a", 1, 0, -6.0206),
+            plain,
+            metered("b", 1, 2, 0.0),
+        ]);
+
+        let infos = rack.meter_infos().to_vec();
+        assert_eq!(infos.len(), 2);
+        assert_eq!(
+            (
+                infos[0].slot,
+                infos[0].strip,
+                infos[0].stage,
+                infos[0].name.as_str()
+            ),
+            (0, 0, 1, "Peak")
+        );
+        assert_eq!((infos[1].slot, infos[1].strip, infos[1].stage), (1, 2, 1));
+
+        let mut input = AudioBlock::new(3, 16);
+        for c in 0..3 {
+            input.channel_mut(c).fill(1.0);
+        }
+        let mut output = AudioBlock::new(3, 16);
+        rack.process(&input, &mut output);
+
+        let bank = rack.meters();
+        assert!(
+            (bank.get(0) - (-6.02)).abs() < 0.05,
+            "strip a: {}",
+            bank.get(0)
+        );
+        assert!(bank.get(1).abs() < 0.05, "strip b: {}", bank.get(1));
     }
 
     #[test]

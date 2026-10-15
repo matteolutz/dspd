@@ -8,18 +8,24 @@ mod block;
 mod chain;
 mod dual_mono;
 mod engine;
-mod gain;
+mod meters;
 mod params;
+mod peak_meter;
 mod processor;
 mod rack;
 pub mod session;
+
+mod dyneq;
+mod gain;
 
 pub use block::AudioBlock;
 pub use chain::{Chain, Stage};
 pub use dual_mono::DualMono;
 pub use engine::{Engine, EngineStats, StatsSnapshot};
 pub use gain::{Gain, GAIN_PARAM_DB};
+pub use meters::{MeterBank, MeterInfo, MeterWriter};
 pub use params::{param_channel, ParamEvent, ParamReceiver, ParamSender};
-pub use processor::{BoxedProcessor, Processor};
+pub use peak_meter::{PeakMeter, PEAK_METER_ID};
+pub use processor::{BoxedProcessor, MeterSpec, Processor};
 pub use rack::{Rack, Strip};
 pub use session::{ClapSpec, GainSpec, SessionSpec, StageSpec, StripSpec, Width};

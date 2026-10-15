@@ -39,9 +39,16 @@ impl Chain {
         &self.stages
     }
 
+    pub fn stages_mut(&mut self) -> &mut [Stage] {
+        &mut self.stages
+    }
+
     /// Sum of the latencies of all stages.
     pub fn total_latency_frames(&self) -> u32 {
-        self.stages.iter().map(|s| s.processor.latency_frames()).sum()
+        self.stages
+            .iter()
+            .map(|s| s.processor.latency_frames())
+            .sum()
     }
 
     /// Route a parameter change to one stage. Out-of-range stages are ignored.
