@@ -34,12 +34,12 @@ Real audio devices: `cargo build --release --features cpal-backend`, then
 
 | crate | role |
 |---|---|
-| `engine` | Audio blocks, `Processor` trait, chains, the `Rack` of mono/stereo strips, `DualMono`, lock-free parameter queue, session JSON. No OS or plugin-format code. |
+| `engine` | Audio blocks, `Processor` trait, chains, the `Rack` of mono/stereo strips, `DualMono`, lock-free parameter queue and meter bank, session JSON. No OS or plugin-format code. |
 | `host-clap` | Loads `.clap` files (clap-sys + libloading, one shared library per file) and runs a plugin as a `Processor`; `inspect()` for discovery. |
 | `audio` | `AudioBackend` trait with `OfflineBackend` (WAV), `NullBackend` (generated signal) and `CpalBackend` (feature `cpal-backend`). |
-| `control` | axum REST API: `/health`, `/session`, `/stats`, `/params`, `/session/save`. |
+| `control` | axum REST API (`/health`, `/session`, `/stats`, `/params`, `/session/save`) plus live meters: `GET /meters` and a WebSocket at `/ws`. |
 | `dspd` | The binary: `render`, `bench`, `serve`, `inspect`, `devices`. |
-| `test-plugin` | A small CLAP gain plugin (a stereo and a mono variant) used as a test fixture. |
+| `test-plugin` | A small CLAP gain plugin (a stereo and a mono variant, with a read-only Peak meter) used as a test fixture. |
 
 ## Sessions: strips
 
@@ -75,6 +75,59 @@ Strips share no state.
 engine and the in-memory session, so `POST /session/save` always writes the live state.
 `strip` is required on purpose: with many strips a forgotten field must not silently hit strip 0.
 
+## Live meters (feedback from plugins to the frontend)
+
+Plugins can publish live values (levels, gain reduction, gate state) that a frontend shows.
+The audio thread writes them into one shared bank of atomics; the network side only reads.
+No locks, no allocation, any number of clients.
+
+**REST snapshot**, `GET /meters`:
+
+```json
+{"meters": [{"slot": 0, "strip": 1, "stage": 0, "param_id": 1, "name": "Peak", "value": 0.49}]}
+```
+
+**WebSocket**, `GET /ws?hz=30` (1 to 100 Hz). First a `hello` with the same metadata, then one
+frame per tick; `values[i]` belongs to the meter whose `slot` is `i`:
+
+```json
+{"type": "hello", "hz": 30, "meters": [ ... ]}
+{"type": "meters", "values": [0.49, -3.2, ...]}
+```
+
+A meter is addressed by `(strip, stage)` like the parameters you set with `POST /params`, so a frontend
+can show a compressor's controls and its gain reduction side by side. Only the latest value is kept, so
+do ballistics (peak hold, release) in the plugin if short peaks must survive between polls.
+
+### Publishing a meter from a native processor
+
+```rust
+struct Compressor { gr: Option<MeterWriter> /* , ... */ }
+
+impl Processor for Compressor {
+    fn meter_specs(&self) -> Vec<MeterSpec> {        // called once while the rack is built
+        vec![MeterSpec { param_id: 0, name: "Gain Reduction".into() }]
+    }
+    fn attach_meters(&mut self, w: MeterWriter) { self.gr = Some(w); }
+    fn process(&mut self, input: &AudioBlock, output: &mut AudioBlock) {
+        // ... compress ...
+        if let Some(w) = &self.gr { w.set(0, reduction_db); }   // real-time safe
+    }
+}
+```
+
+`PeakMeter` (`{"type": "peak_meter"}` in a session) is a complete working example.
+
+### Publishing a meter from a CLAP plugin
+
+Declare the value as a **read-only parameter** (`CLAP_PARAM_IS_READONLY`) and send its value as a
+`CLAP_EVENT_PARAM_VALUE` *output event* from `process`, once per block. dspd finds the read-only
+parameters when it loads the plugin and turns each into a meter; `dspd inspect` marks them as outputs.
+The test plugin's `Peak` parameter is a minimal example. Other CLAP hosts treat the same parameter as a meter too.
+
+A mono-only plugin on a stereo strip runs as two instances and reports one value per side
+(`"Gain Reduction L"` / `"Gain Reduction R"`).
+
 ## Real-time rules the code follows
 
 * `Processor::process` and `set_param` never allocate, lock or log. Buffers are allocated up front.
@@ -90,6 +143,7 @@ engine and the in-memory session, so `POST /session/save` always writes the live
   new rack on a worker thread, publish it with an atomic pointer swap, free the old one off the audio thread.
 * **Crash isolation.** Plugins run in-process; a crashing plugin takes the server down. Next step: one process per strip group with shared-memory audio.
 * **CLAP coverage.** No GUI, MIDI/notes, transport, state save/load, or host extensions. Side-chain inputs get silence.
+* **Meters are scalars.** No arrays (spectra, waveforms). The WebSocket pushes meter values only, not parameter changes made by other clients.
 * **Linked stereo only.** Mono-only plugins on stereo strips share one set of parameters for both sides.
 * **Network audio** (PTP + AES67) and the RT-tuned Linux image.
 * The cpal backend is a development convenience, not the low-latency path. It opens exactly
@@ -97,7 +151,7 @@ engine and the in-memory session, so `POST /session/save` always writes the live
 
 ## Status of what was verified
 
-All crates build and the 51 tests pass on Linux, including full runs of the real binary against real
+All crates build and the 66 tests pass on Linux, including full runs of the real binary against real
 CLAP plugin binaries: a 32-channel offline render through mono and stereo strips (each channel at a
 different level, so crosstalk would show) and a live `serve` driven over HTTP. **Not yet verified:** Windows/macOS builds (CI is set up
 for Windows), the cpal backend on real hardware (it type-checks), and any third-party
