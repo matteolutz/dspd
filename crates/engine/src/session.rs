@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::dyneq::DynamicEq;
+use crate::ir_loader::IRLoader;
 use crate::{BoxedProcessor, Chain, Gain, PeakMeter, Rack, Stage, Strip, GAIN_PARAM_DB};
 
 /// Upper bound on device channels in a session; guards against typos allocating gigabytes.
@@ -96,6 +97,7 @@ impl StripSpec {
 pub enum StageSpec {
     Gain(GainSpec),
     DynEq(DynEqSpec),
+    IrLoader(IrLoaderSpec),
     Clap(ClapSpec),
 
     /// Pass-through that publishes the peak level in dBFS as a meter.
@@ -124,6 +126,11 @@ pub struct DynEqBandSpec {
 pub struct DynEqSpec {
     #[serde(default)]
     bands: Vec<DynEqBandSpec>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct IrLoaderSpec {
+    ir: PathBuf,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -164,6 +171,7 @@ impl StageSpec {
         match self {
             StageSpec::Gain(_) => "gain".to_string(),
             StageSpec::DynEq(_) => "dyneq".to_string(),
+            StageSpec::IrLoader(_) => "ir_loader".to_string(),
             StageSpec::PeakMeter => "peak_meter".to_string(),
             StageSpec::Clap(c) => c
                 .plugin_id
@@ -306,6 +314,9 @@ impl SessionSpec {
                         width,
                         &eq.bands,
                     )),
+                    StageSpec::IrLoader(ir) => {
+                        Box::new(IRLoader::from_wav(&ir.ir, self.sample_rate, width).unwrap())
+                    }
                     StageSpec::PeakMeter => Box::new(PeakMeter::new(self.sample_rate)),
                     StageSpec::Clap(c) => load_clap(c, width)?,
                 };

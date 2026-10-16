@@ -8,19 +8,8 @@
       "input": 0,
       "chain": [
         {
-          "type": "dyn_eq",
-          "bands": [
-            {
-              "freq": 400,
-              "q": 2,
-              "static_gain_db": 20,
-              "threshold_db": 20,
-              "ratio": 1,
-              "range_db": 0,
-              "attack_ms": 0,
-              "release_ms": 0
-            }
-          ]
+          "type": "ir_loader",
+          "ir": "/Users/matteolutz/Downloads/LT-TV-MIX-7-500N-mono-48k.wav"
         }
       ]
     }

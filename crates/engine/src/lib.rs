@@ -17,6 +17,7 @@ pub mod session;
 
 mod dyneq;
 mod gain;
+mod ir_loader;
 
 pub use block::AudioBlock;
 pub use chain::{Chain, Stage};
