@@ -1,0 +1,10 @@
+[package]
+name = "dspd-ui"
+description = "Control surface that is connected via network to the headless DSDP server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+gpui-kit = "0.7.3"

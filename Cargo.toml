@@ -7,6 +7,7 @@ members = [
     "crates/host-clap",
     "crates/control",
     "crates/dspd",
+    "crates/ui",
     "crates/test-plugin",
 
     "plugins/gain",
