@@ -8,8 +8,15 @@
       "input": 0,
       "chain": [
         {
-          "type": "ir_loader",
-          "ir": "/Users/matteolutz/Downloads/LT-TV-MIX-7-500N-mono-48k.wav"
+          "type": "dyn_eq",
+          "freq_hz_1": 1000,
+          "threshold_db_1": -40,
+          "ratio_1": 4,
+          "range_db_1": -20.0,
+          "release_ms_1": 300
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     }

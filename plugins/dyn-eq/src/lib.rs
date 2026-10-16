@@ -1,14 +1,18 @@
-use crate::{dyneq::band::DynamicBand, session::DynEqBandSpec, AudioBlock, Processor};
+use dspd_api::{AudioBlock, MeterSpec, MeterWriter, OptionalMeterWriter, Processor};
+
+use crate::band::DynamicBand;
 
 mod band;
 mod state;
 
-pub const BAND_COUNT: usize = 6;
-pub const PARAMS_PER_BAND: u32 = 8;
+mod descriptor;
+pub use descriptor::{BAND_COUNT, DESCRIPTOR, PARAMS_PER_BAND};
 
 pub struct DynamicEq {
     bands: [DynamicBand; BAND_COUNT],
     prepared_channels: usize,
+
+    meters: Option<MeterWriter>,
 }
 
 impl DynamicEq {
@@ -16,25 +20,8 @@ impl DynamicEq {
         Self {
             bands: std::array::from_fn(|_| DynamicBand::new(sample_rate, channels)),
             prepared_channels: channels,
-        }
-    }
 
-    pub fn new_with_bands<'a>(
-        sample_rate: f32,
-        channels: usize,
-        bands: impl IntoIterator<Item = &'a DynEqBandSpec>,
-    ) -> Self {
-        let mut bands_iter = bands
-            .into_iter()
-            .map(|spec| DynamicBand::new(sample_rate, channels).with_spec(spec));
-
-        Self {
-            bands: std::array::from_fn(|_| {
-                bands_iter
-                    .next()
-                    .unwrap_or_else(|| DynamicBand::new(sample_rate, channels))
-            }),
-            prepared_channels: channels,
+            meters: None,
         }
     }
 }
@@ -75,7 +62,7 @@ impl Processor for DynamicEq {
             }
 
             // Each band uses its own detector, envelope and EQ state.
-            for band in &mut self.bands {
+            for (band_idx, band) in self.bands.iter_mut().enumerate() {
                 // 1. Measure the input energy in this frequency region.
                 // Average power links channels to a common dynamic gain.
                 let mut power_sum = 0.0_f32;
@@ -111,6 +98,9 @@ impl Processor for DynamicEq {
                 // Negative range cuts; positive range boosts above threshold.
                 let dynamic_gain_db = band.range_db.signum() * movement_db;
 
+                // write the gain reduction to the meter
+                self.meters.set_if_some(band_idx, dynamic_gain_db);
+
                 let target_gain_db = (band.static_gain_db + dynamic_gain_db).clamp(-24.0, 24.0);
 
                 // 5. Smooth gain changes before redesigning the EQ.
@@ -130,5 +120,18 @@ impl Processor for DynamicEq {
                 }
             }
         }
+    }
+
+    fn meter_specs(&self) -> Vec<dspd_api::MeterSpec> {
+        (0..BAND_COUNT)
+            .map(|band| MeterSpec {
+                param_id: band as u32,
+                name: format!("Band {} Gain Reduction (dB)", band + 1),
+            })
+            .collect()
+    }
+
+    fn attach_meters(&mut self, writer: MeterWriter) {
+        self.meters = Some(writer)
     }
 }

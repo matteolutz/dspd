@@ -189,8 +189,9 @@ impl AudioBackend for OfflineBackend {
 
 #[cfg(test)]
 mod tests {
+    use dspd_plugin_gain::Gain;
+
     use super::*;
-    use dspd_engine::Gain;
 
     fn write_wav(path: &Path, channels: u16, frames: usize, value: i16) {
         let mut w = WavWriter::create(

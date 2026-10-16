@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+dspd-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rtrb.workspace = true
@@ -14,3 +15,8 @@ thiserror.workspace = true
 
 hound = "3.5"
 fft-convolver = "0.4"
+
+[dev-dependencies]
+# Plugins depend on dspd-api only, so the engine can test against real ones.
+dspd-plugin-gain.workspace = true
+dspd-plugin-peak-meter.workspace = true

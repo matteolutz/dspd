@@ -1,4 +1,4 @@
-use crate::{AudioBlock, MeterSpec, MeterWriter, Processor};
+use dspd_api::{AudioBlock, MeterSpec, MeterWriter, ParamDef, PluginDescriptor, Processor};
 
 /// Pass-through stage that reports the peak level of its input in dBFS.
 ///
@@ -13,6 +13,15 @@ pub struct PeakMeter {
     held: f32, // linear
     writer: Option<MeterWriter>,
 }
+
+/// Descriptor the host registers: `{"type": "peak_meter"}`. It has no settable parameters.
+pub static DESCRIPTOR: PluginDescriptor = PluginDescriptor {
+    id: "peak_meter",
+    name: "Peak Meter",
+    description: "Pass-through that publishes the peak level in dBFS",
+    params: &[] as &[ParamDef],
+    create: |ctx| Box::new(PeakMeter::new(ctx.sample_rate)),
+};
 
 /// Parameter id used for the meter this stage declares.
 pub const PEAK_METER_ID: u32 = 0;
@@ -68,7 +77,7 @@ impl Processor for PeakMeter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::MeterBank;
+    use dspd_api::MeterBank;
 
     fn run(m: &mut PeakMeter, value: f32, frames: usize) {
         let mut input = AudioBlock::new(2, frames);

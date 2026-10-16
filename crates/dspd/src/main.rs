@@ -7,6 +7,7 @@
 //! dspd serve   -s session.json                     run live + REST control API
 //! ```
 
+mod plugins;
 mod rt;
 
 use std::net::SocketAddr;
@@ -20,8 +21,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use dspd_audio::{probe_wav, AudioBackend, NullBackend, OfflineBackend, RunReport, Signal};
 use dspd_control::ControlState;
 use dspd_engine::{
-    param_channel, BoxedProcessor, ClapSpec, DualMono, Engine, ParamSender, Processor, SessionSpec,
-    Width,
+    param_channel, BoxedProcessor, ClapSpec, DualMono, Engine, ParamSender, Processor, Registry,
+    SessionSpec, Width,
 };
 use dspd_host_clap::{inspect, ClapProcessor};
 use tracing_subscriber::EnvFilter;
@@ -48,6 +49,8 @@ enum Command {
         /// Path to the .clap file.
         plugin: PathBuf,
     },
+    /// List the built-in native plugins and their parameters.
+    Plugins,
     /// List audio devices (cpal backend).
     #[cfg(feature = "cpal-backend")]
     Devices,
@@ -164,6 +167,7 @@ fn main() -> Result<()> {
         Command::Bench(a) => bench(a),
         Command::Serve(a) => serve(a),
         Command::Inspect { plugin } => inspect_plugin(&plugin),
+        Command::Plugins => list_native_plugins(),
         #[cfg(feature = "cpal-backend")]
         Command::Devices => devices(),
     }
@@ -215,14 +219,14 @@ fn load_clap_stage(
 }
 
 /// Instantiate every strip of the session (loading CLAP plugins) and wrap the rack in an engine.
-fn build_engine(spec: &SessionSpec) -> Result<(Engine, ParamSender)> {
+fn build_engine(spec: &SessionSpec, registry: &Registry) -> Result<(Engine, ParamSender)> {
     if spec.strips.is_empty() {
         bail!("the session has no strips");
     }
     let sample_rate = f64::from(spec.sample_rate);
     let max_block = spec.max_block;
     let mut instances = 0;
-    let rack = spec.build_rack(|c: &ClapSpec, width| {
+    let rack = spec.build_rack(registry, |c: &ClapSpec, width| {
         load_clap_stage(c, width, sample_rate, max_block, &mut instances)
     })?;
     let mono = spec
@@ -231,11 +235,12 @@ fn build_engine(spec: &SessionSpec) -> Result<(Engine, ParamSender)> {
         .filter(|s| s.width == Width::Mono)
         .count();
     tracing::info!(
-        "built {} strips ({} mono, {} stereo), {} plugin instances; {} in / {} out channels; rack latency {} frames",
+        "built {} strips ({} mono, {} stereo), {} plugin instances, {} meters; {} in / {} out channels; rack latency {} frames",
         spec.strips.len(),
         mono,
         spec.strips.len() - mono,
         instances,
+        rack.meter_infos().len(),
         spec.input_channels(),
         spec.output_channels(),
         rack.latency_frames(),
@@ -315,7 +320,7 @@ fn render(a: RenderArgs) -> Result<()> {
         );
     }
 
-    let (engine, _params) = build_engine(&spec)?;
+    let (engine, _params) = build_engine(&spec, &plugins::registry())?;
     let stats = engine.stats();
     let latency = engine.latency_frames();
 
@@ -342,7 +347,7 @@ fn bench(a: BenchArgs) -> Result<()> {
         bail!("--seconds must be positive");
     }
 
-    let (engine, _params) = build_engine(&spec)?;
+    let (engine, _params) = build_engine(&spec, &plugins::registry())?;
     let stats = engine.stats();
     let latency = engine.latency_frames();
 
@@ -379,15 +384,20 @@ fn serve(a: ServeArgs) -> Result<()> {
         }
     }
 
-    let (engine, params) = build_engine(&spec)?;
+    let registry = Arc::new(plugins::registry());
+    let (engine, params) = build_engine(&spec, &registry)?;
     let stats = engine.stats();
     let latency = engine.latency_frames();
-    let state = Arc::new(ControlState::new(
-        params,
-        spec.clone(),
-        Arc::clone(&stats),
-        Some(a.session.clone()),
-    ));
+    let state = Arc::new(
+        ControlState::new(
+            params,
+            spec.clone(),
+            Arc::clone(&registry),
+            Arc::clone(&stats),
+            Some(a.session.clone()),
+        )
+        .with_meters(engine.meters(), engine.meter_infos()),
+    );
 
     // The control API lives on a small tokio runtime; the audio side blocks this thread.
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -465,6 +475,22 @@ fn serve(a: ServeArgs) -> Result<()> {
         latency,
     );
     runtime.shutdown_background();
+    Ok(())
+}
+
+fn list_native_plugins() -> Result<()> {
+    for d in plugins::registry().iter() {
+        println!("{}  \"{}\"  {}", d.id, d.name, d.description);
+        if d.params.is_empty() {
+            println!("  (no settable parameters)");
+        }
+        for p in d.params {
+            println!(
+                "  param {:>3}  {:<12} {:<16} range {} .. {}, default {}",
+                p.id, p.key, p.name, p.min, p.max, p.default
+            );
+        }
+    }
     Ok(())
 }
 

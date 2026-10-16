@@ -1,0 +1,10 @@
+[package]
+name = "dspd-plugin-gain"
+description = "dspd native plugin: Gain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dspd-api.workspace = true

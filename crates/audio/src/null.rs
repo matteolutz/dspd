@@ -140,8 +140,9 @@ impl AudioBackend for NullBackend {
 
 #[cfg(test)]
 mod tests {
+    use dspd_plugin_gain::Gain;
+
     use super::*;
-    use dspd_engine::Gain;
 
     #[test]
     fn stops_after_duration_with_partial_last_block() {

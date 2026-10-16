@@ -235,7 +235,8 @@ impl Processor for Rack {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Gain, Stage};
+    use crate::Stage;
+    use dspd_plugin_gain::Gain;
 
     fn strip(name: &str, width: usize, input: usize, output: usize, db: f32) -> Strip {
         let stage = Stage {
@@ -396,7 +397,7 @@ mod tests {
 
     #[test]
     fn meters_are_collected_per_strip_and_stage() {
-        use crate::PeakMeter;
+        use dspd_plugin_peak_meter::PeakMeter;
         let metered = |name: &str, width: usize, input: usize, db: f32| {
             let stages = vec![
                 Stage {
@@ -449,8 +450,8 @@ mod tests {
     #[test]
     fn param_is_routed_to_the_addressed_strip_only() {
         let mut rack = Rack::new(vec![strip("a", 1, 0, 0, 0.0), strip("b", 1, 1, 1, 0.0)]);
-        rack.set_param(1, 0, crate::GAIN_PARAM_DB, -120.0);
-        rack.set_param(9, 0, crate::GAIN_PARAM_DB, -120.0); // out of range: ignored
+        rack.set_param(1, 0, dspd_plugin_gain::GAIN_PARAM_DB, -120.0);
+        rack.set_param(9, 0, dspd_plugin_gain::GAIN_PARAM_DB, -120.0); // out of range: ignored
 
         let mut input = AudioBlock::new(2, 8);
         input.channel_mut(0).fill(1.0);

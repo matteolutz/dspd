@@ -126,7 +126,8 @@ impl Processor for Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{param_channel, Chain, Gain, ParamEvent, Stage, Strip};
+    use crate::{param_channel, Chain, ParamEvent, Stage, Strip};
+    use dspd_plugin_gain::Gain;
 
     #[test]
     fn param_events_are_applied_before_processing() {

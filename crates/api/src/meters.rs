@@ -112,6 +112,18 @@ impl MeterWriter {
     }
 }
 
+pub trait OptionalMeterWriter {
+    fn set_if_some(&self, index: usize, value: f32);
+}
+
+impl OptionalMeterWriter for Option<MeterWriter> {
+    fn set_if_some(&self, index: usize, value: f32) {
+        if let Some(writer) = self {
+            writer.set(index, value)
+        }
+    }
+}
+
 /// Where a meter lives and what it is, for the frontend.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MeterInfo {

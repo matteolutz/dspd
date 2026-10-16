@@ -1,0 +1,10 @@
+[package]
+name = "dspd-api"
+description = "The small interface native dspd plugins are written against"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true

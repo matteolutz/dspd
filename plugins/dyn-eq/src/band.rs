@@ -1,9 +1,6 @@
 use std::f32::consts::TAU;
 
-use crate::{
-    dyneq::state::{BiquadState, Coeffs},
-    session::DynEqBandSpec,
-};
+use crate::state::{BiquadState, Coeffs};
 
 #[derive(Debug)]
 pub struct DynamicBand {
@@ -74,24 +71,12 @@ impl DynamicBand {
         band
     }
 
-    pub fn with_spec(mut self, spec: &DynEqBandSpec) -> Self {
-        self.frequency_hz = spec.freq;
-        self.q = spec.q;
-        self.static_gain_db = spec.static_gain_db;
-        self.threshold_db = spec.threshold_db;
-        self.ratio = spec.ratio;
-        self.range_db = spec.range_db;
-        self.attack_ms = spec.attack_ms;
-        self.release_ms = spec.release_ms;
-        self
-    }
-
     fn redesign(&mut self) {
         self.frequency_hz = self.frequency_hz.clamp(20.0, self.sample_rate * 0.45);
 
         self.q = self.q.clamp(0.1, 18.0);
 
-        let w0 = TAU * self.frequency_hz / self.sample_rate as f32;
+        let w0 = TAU * self.frequency_hz / self.sample_rate;
         let (sin_w0, cos_w0) = w0.sin_cos();
 
         self.cos_w0 = cos_w0;

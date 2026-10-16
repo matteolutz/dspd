@@ -7,6 +7,22 @@
 //! | GET    | `/stats`        | engine load, block count, overruns                    |
 //! | POST   | `/params`       | `{"strip":0,"stage":0,"param_id":0,"value":-6.0}` -> audio thread |
 //! | POST   | `/session/save` | write the session to the path given at startup        |
+//! | GET    | `/plugins`      | native plugins this server offers, with their parameters |
+//! | GET    | `/meters`       | every live meter value, with strip, stage and name    |
+//! | GET    | `/ws?hz=30`     | WebSocket: meter values pushed at `hz` (1-100)        |
+//!
+//! # Meters
+//!
+//! Processors publish live values (levels, gain reduction, ...) into a shared
+//! lock-free bank; see `dspd_engine::MeterBank`. `/meters` returns one snapshot:
+//!
+//! ```json
+//! {"meters": [{"slot": 0, "strip": 1, "stage": 0, "param_id": 1, "name": "Peak", "value": 0.49}]}
+//! ```
+//!
+//! The WebSocket first sends `{"type":"hello","hz":30,"meters":[...same metadata...]}`
+//! and then `{"type":"meters","values":[...]}` every tick, with `values[i]` belonging to
+//! the meter whose `slot` is `i`. Non-finite values arrive as `null`.
 //!
 //! Parameter changes go through the lock-free queue to the audio thread and
 //! are also recorded in the session, so a save always reflects the live state.
@@ -16,14 +32,20 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 use anyhow::Result;
-use axum::extract::State;
+use axum::extract::ws::{Message, WebSocket};
+use axum::extract::{Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use dspd_engine::{EngineStats, ParamEvent, ParamSender, SessionSpec, StatsSnapshot};
-use serde::Deserialize;
+use dspd_engine::{
+    EngineStats, MeterBank, MeterInfo, ParamEvent, ParamSender, Registry, SessionSpec,
+    StatsSnapshot,
+};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 
@@ -31,15 +53,19 @@ use tokio::net::TcpListener;
 pub struct ControlState {
     params: Mutex<ParamSender>,
     session: Mutex<SessionSpec>,
+    registry: Arc<Registry>,
     stats: Arc<EngineStats>,
     sample_rate: u32,
     session_path: Option<PathBuf>,
+    meters: Arc<MeterBank>,
+    meter_infos: Arc<[MeterInfo]>,
 }
 
 impl ControlState {
     pub fn new(
         params: ParamSender,
         session: SessionSpec,
+        registry: Arc<Registry>,
         stats: Arc<EngineStats>,
         session_path: Option<PathBuf>,
     ) -> Self {
@@ -47,9 +73,19 @@ impl ControlState {
             sample_rate: session.sample_rate,
             params: Mutex::new(params),
             session: Mutex::new(session),
+            registry,
             stats,
             session_path,
+            meters: MeterBank::new(0),
+            meter_infos: Arc::from(Vec::new()),
         }
+    }
+
+    /// Serve the engine's live meters (`Engine::meters()` and `Engine::meter_infos()`).
+    pub fn with_meters(mut self, meters: Arc<MeterBank>, infos: Arc<[MeterInfo]>) -> Self {
+        self.meters = meters;
+        self.meter_infos = infos;
+        self
     }
 }
 
@@ -102,6 +138,7 @@ async fn set_param(
     // Validate against a copy so a rejected change leaves the session untouched.
     let mut candidate = session.clone();
     if !candidate.apply_param(
+        &s.registry,
         req.strip as usize,
         req.stage as usize,
         req.param_id,
@@ -149,6 +186,96 @@ async fn save_session(State(s): State<Shared>) -> Result<Json<Value>, ApiError> 
     Ok(Json(json!({ "status": "saved", "path": path })))
 }
 
+async fn get_plugins(State(s): State<Shared>) -> Json<Value> {
+    let plugins: Vec<Value> = s
+        .registry
+        .iter()
+        .map(|d| {
+            let params: Vec<Value> = d
+                .params
+                .iter()
+                .map(|p| {
+                    json!({ "id": p.id, "key": p.key, "name": p.name, "min": p.min, "max": p.max, "default": p.default })
+                })
+                .collect();
+            json!({ "id": d.id, "name": d.name, "description": d.description, "params": params })
+        })
+        .collect();
+    Json(json!({ "plugins": plugins }))
+}
+
+/// One meter as `/meters` reports it: its metadata plus the current value.
+#[derive(Serialize)]
+struct MeterReading<'a> {
+    #[serde(flatten)]
+    info: &'a MeterInfo,
+    value: f32,
+}
+
+async fn get_meters(State(s): State<Shared>) -> Json<Value> {
+    let readings: Vec<_> = s
+        .meter_infos
+        .iter()
+        .map(|info| MeterReading {
+            info,
+            value: s.meters.get(info.slot),
+        })
+        .collect();
+    Json(json!({ "meters": readings }))
+}
+
+const DEFAULT_METER_HZ: u32 = 30;
+const MAX_METER_HZ: u32 = 100;
+
+#[derive(Deserialize)]
+struct WsQuery {
+    hz: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct MeterFrame<'a> {
+    r#type: &'static str,
+    values: &'a [f32],
+}
+
+async fn ws_meters(
+    ws: WebSocketUpgrade,
+    State(s): State<Shared>,
+    Query(q): Query<WsQuery>,
+) -> impl IntoResponse {
+    let hz = q.hz.unwrap_or(DEFAULT_METER_HZ).clamp(1, MAX_METER_HZ);
+    ws.on_upgrade(move |socket| stream_meters(socket, s, hz))
+}
+
+/// Push the meter bank to one client at a fixed rate until it disconnects.
+/// Reads are relaxed atomic loads, so any number of clients cost the audio thread nothing.
+async fn stream_meters(mut socket: WebSocket, s: Shared, hz: u32) {
+    let hello = json!({ "type": "hello", "hz": hz, "meters": &*s.meter_infos }).to_string();
+    if socket.send(Message::Text(hello.into())).await.is_err() {
+        return;
+    }
+
+    let mut tick = tokio::time::interval(Duration::from_millis(1000 / u64::from(hz)));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut values = Vec::with_capacity(s.meters.len());
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {
+                s.meters.snapshot_into(&mut values);
+                let Ok(frame) = serde_json::to_string(&MeterFrame { r#type: "meters", values: &values }) else { break };
+                if socket.send(Message::Text(frame.into())).await.is_err() {
+                    break;
+                }
+            }
+            incoming = socket.recv() => match incoming {
+                // Closed, errored, or a close frame: stop. Anything else the client sends is ignored.
+                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+                Some(Ok(_)) => {}
+            },
+        }
+    }
+}
+
 /// Build the router. Exposed separately so tests can call it without a socket.
 pub fn router(state: Shared) -> Router {
     Router::new()
@@ -157,6 +284,9 @@ pub fn router(state: Shared) -> Router {
         .route("/stats", get(get_stats))
         .route("/params", post(set_param))
         .route("/session/save", post(save_session))
+        .route("/plugins", get(get_plugins))
+        .route("/meters", get(get_meters))
+        .route("/ws", get(ws_meters))
         .with_state(state)
 }
 
@@ -172,7 +302,8 @@ mod tests {
     use super::*;
     use axum::body::{to_bytes, Body};
     use axum::http::{Method, Request};
-    use dspd_engine::{param_channel, GainSpec, ParamReceiver, StageSpec, StripSpec, Width};
+    use dspd_engine::session::NativeSpec;
+    use dspd_engine::{param_channel, ParamReceiver, StageSpec, StripSpec, Width};
     use tower::ServiceExt;
 
     fn setup(path: Option<PathBuf>) -> (Shared, ParamReceiver) {
@@ -182,7 +313,9 @@ mod tests {
             width,
             input,
             output: None,
-            chain: vec![StageSpec::Gain(GainSpec { gain_db: 0.0 })],
+            chain: vec![StageSpec::Native(
+                NativeSpec::new("gain").with("gain_db", 0.0),
+            )],
         };
         // strip 0: mono on channel 0; strip 1: stereo on channels 1-2
         let spec = SessionSpec {
@@ -192,10 +325,13 @@ mod tests {
             outputs: None,
             strips: vec![strip(0, Width::Mono), strip(1, Width::Stereo)],
         };
+        let registry = Registry::from_descriptors(&[&dspd_plugin_gain::DESCRIPTOR]).unwrap();
+
         (
             Arc::new(ControlState::new(
                 tx,
                 spec,
+                Arc::new(registry),
                 Arc::new(EngineStats::default()),
                 path,
             )),
@@ -326,7 +462,7 @@ mod tests {
 
         let saved = SessionSpec::load(&path).unwrap();
         match &saved.strips[0].chain[0] {
-            StageSpec::Gain(g) => assert_eq!(g.gain_db, -3.0),
+            StageSpec::Native(n) => assert_eq!(n.settings["gain_db"], -3.0),
             other => panic!("unexpected {other:?}"),
         }
     }

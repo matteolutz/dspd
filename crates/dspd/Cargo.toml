@@ -22,6 +22,10 @@ serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+dspd-plugin-gain.workspace = true
+dspd-plugin-peak-meter.workspace = true
+dspd-plugin-dyn-eq.workspace = true
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 

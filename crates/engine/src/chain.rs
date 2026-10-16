@@ -87,7 +87,7 @@ impl Processor for Chain {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Gain;
+    use dspd_plugin_gain::Gain;
 
     fn stage(db: f32) -> Stage {
         Stage {

@@ -99,8 +99,9 @@ impl Processor for DualMono {
 
 #[cfg(test)]
 mod tests {
+    use dspd_plugin_gain::Gain;
+
     use super::*;
-    use crate::Gain;
 
     #[test]
     fn left_and_right_stay_independent() {
@@ -121,7 +122,7 @@ mod tests {
     #[test]
     fn params_reach_both_instances() {
         let mut dm = DualMono::new(Box::new(Gain::new(0.0)), Box::new(Gain::new(0.0)), 8);
-        dm.set_param(crate::GAIN_PARAM_DB, -120.0);
+        dm.set_param(dspd_plugin_gain::GAIN_PARAM_DB, -120.0);
         let mut input = AudioBlock::new(2, 8);
         input.channel_mut(0).fill(1.0);
         input.channel_mut(1).fill(1.0);
@@ -133,6 +134,37 @@ mod tests {
             .iter()
             .chain(output.channel(1))
             .all(|s| s.abs() < 1e-3));
+    }
+
+    #[test]
+    fn meters_are_reported_per_side() {
+        use crate::MeterBank;
+        use dspd_plugin_peak_meter::PeakMeter;
+        let mut dm = DualMono::new(
+            Box::new(PeakMeter::new(48_000)),
+            Box::new(PeakMeter::new(48_000)),
+            16,
+        );
+        let names: Vec<_> = dm.meter_specs().into_iter().map(|s| s.name).collect();
+        assert_eq!(names, vec!["Peak L", "Peak R"]);
+
+        let bank = MeterBank::new(2);
+        dm.attach_meters(MeterWriter::new(bank.clone(), 0, 2));
+        let mut input = AudioBlock::new(2, 16);
+        input.channel_mut(0).fill(1.0);
+        input.channel_mut(1).fill(0.25);
+        let mut output = AudioBlock::new(2, 16);
+        dm.process(&input, &mut output);
+        assert!(
+            bank.get(0).abs() < 0.01,
+            "left at 0 dBFS, got {}",
+            bank.get(0)
+        );
+        assert!(
+            (bank.get(1) - (-12.04)).abs() < 0.05,
+            "right at -12 dBFS, got {}",
+            bank.get(1)
+        );
     }
 
     #[test]

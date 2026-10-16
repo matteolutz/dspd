@@ -20,3 +20,4 @@ cpal = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
+dspd-plugin-gain.workspace = true
