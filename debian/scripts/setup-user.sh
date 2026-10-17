@@ -10,3 +10,5 @@ adduser --gecos "$USER" \
         "$USER"
 adduser "$USER" sudo
 echo "$USER:$USER" | chpasswd
+
+usermod -aG audio "$USER"

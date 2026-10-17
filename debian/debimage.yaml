@@ -32,16 +32,17 @@ actions:
       - grub-efi-amd64
       - grub-common
       - dosfstools
+      - jackd2
+      - alsa-utils
 
   - action: run
     description: Set up user
     chroot: true
     script: scripts/setup-user.sh {{ $adminusername }}
 
-  - action: run
-    description: Add hostname
-    chroot: true
-    command: echo dspd > /etc/hostname
+  - action: overlay
+    description: Copy configuration (audio, hostname) into image
+    source: overlay
 
   - action: image-partition
     imagename: {{ $image }}
