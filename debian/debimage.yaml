@@ -29,8 +29,9 @@ actions:
       - iproute2
       - network-manager
       - libnss-myhostname
-      - grub-efi-amd64-bin
+      - grub-efi-amd64
       - grub-common
+      - dosfstools
 
   - action: run
     description: Set up user
