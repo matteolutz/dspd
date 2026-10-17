@@ -71,6 +71,11 @@ actions:
     command: grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable --no-nvram
 
   - action: run
+    description: Add nomodeset to GRUB default command line
+    chroot: true
+    command: sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="nomodeset /' /etc/default/grub
+
+  - action: run
     description: Update GRUB Menu
     chroot: true
     command: update-grub
