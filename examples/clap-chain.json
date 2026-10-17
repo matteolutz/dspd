@@ -4,9 +4,12 @@
   "strips": [
     {
       "name": "piano",
-      "width": "stereo",
+      "width": "mono",
       "input": 0,
       "chain": [
+        {
+          "type": "peak_meter"
+        },
         {
           "type": "dyn_eq",
           "freq_hz_1": 1000,
@@ -14,9 +17,6 @@
           "ratio_1": 4,
           "range_db_1": -20.0,
           "release_ms_1": 300
-        },
-        {
-          "type": "peak_meter"
         }
       ]
     }
