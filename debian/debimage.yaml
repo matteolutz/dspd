@@ -15,7 +15,7 @@ actions:
     variant: minbase
 
   - action: apt
-    description: Install Kernel, U-Boot and extra packages
+    description: Install Kernel, GRUB and extra packages
     packages:
       - linux-image-rt-amd64
       - linux-headers-rt-amd64
