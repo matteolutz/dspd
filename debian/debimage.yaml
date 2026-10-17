@@ -15,7 +15,9 @@ actions:
 
   - action: apt
     description: Install Kernel, U-Boot and extra packages
-    packages: [ linux-image-rt-amd64 linux-headers-rt-amd64 ]
+    packages:
+      - linux-image-rt-amd64
+      - linux-headers-rt-amd64
 
   - action: run
     description: Add hostname
