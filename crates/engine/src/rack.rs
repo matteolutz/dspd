@@ -406,7 +406,7 @@ mod tests {
                 },
                 Stage {
                     label: "m".into(),
-                    processor: Box::new(PeakMeter::new(48_000)),
+                    processor: Box::new(PeakMeter::new(48_000, width)),
                 },
             ];
             Strip::new(name, input, input, Chain::new(width, 64, stages))

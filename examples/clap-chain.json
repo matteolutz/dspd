@@ -1,22 +1,14 @@
 {
-  "sample_rate": 48000,
+  "sample_rate": 44100,
   "max_block": 256,
   "strips": [
     {
       "name": "piano",
-      "width": "mono",
+      "width": "stereo",
       "input": 0,
       "chain": [
         {
           "type": "peak_meter"
-        },
-        {
-          "type": "dyn_eq",
-          "freq_hz_1": 1000,
-          "threshold_db_1": -40,
-          "ratio_1": 4,
-          "range_db_1": -20.0,
-          "release_ms_1": 300
         }
       ]
     }

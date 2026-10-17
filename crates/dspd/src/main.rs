@@ -54,6 +54,9 @@ enum Command {
     /// List audio devices (cpal backend).
     #[cfg(feature = "cpal-backend")]
     Devices,
+    /// Get the supported stream configurations of an audio device (cpal backend).
+    #[cfg(feature = "cpal-backend")]
+    DeviceConfigs(DeviceConfigsArgs),
 }
 
 #[derive(clap::Args)]
@@ -154,6 +157,23 @@ struct ServeArgs {
     no_input: bool,
 }
 
+#[derive(Copy, Clone, ValueEnum)]
+enum DeviceType {
+    Input,
+    Output,
+}
+
+#[derive(clap::Args)]
+struct DeviceConfigsArgs {
+    /// Input device name (substring match).
+    #[arg(short, long)]
+    device: String,
+
+    /// Input or output device?
+    #[arg(short, long)]
+    r#type: DeviceType,
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -170,6 +190,8 @@ fn main() -> Result<()> {
         Command::Plugins => list_native_plugins(),
         #[cfg(feature = "cpal-backend")]
         Command::Devices => devices(),
+        #[cfg(feature = "cpal-backend")]
+        Command::DeviceConfigs(a) => device_configs(a),
     }
 }
 
@@ -532,5 +554,22 @@ fn devices() -> Result<()> {
     inputs.iter().for_each(|d| println!("  {d}"));
     println!("output devices:");
     outputs.iter().for_each(|d| println!("  {d}"));
+    Ok(())
+}
+
+#[cfg(feature = "cpal-backend")]
+fn device_configs(a: DeviceConfigsArgs) -> Result<()> {
+    let configs =
+        dspd_audio::list_device_configs(&a.device, matches!(a.r#type, DeviceType::Input))?;
+
+    println!(
+        "Supported {} configs:",
+        match a.r#type {
+            DeviceType::Input => "input",
+            DeviceType::Output => "output",
+        }
+    );
+
+    configs.iter().for_each(|d| println!("  {d}"));
     Ok(())
 }

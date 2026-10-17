@@ -20,7 +20,7 @@ pub use engine::{Engine, EngineStats, StatsSnapshot};
 pub use params::{param_channel, ParamEvent, ParamReceiver, ParamSender};
 pub use rack::{Rack, Strip};
 pub use registry::Registry;
-pub use session::{ClapSpec, GainSpec, SessionSpec, StageSpec, StripSpec, Width};
+pub use session::{ClapSpec, SessionSpec, StageSpec, StripSpec, Width};
 
 pub use dspd_api::{
     AudioBlock, BoxedProcessor, MeterBank, MeterInfo, MeterSpec, MeterWriter, ParamDef,

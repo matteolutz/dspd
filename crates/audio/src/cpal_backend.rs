@@ -66,6 +66,24 @@ fn find_device(host: &cpal::Host, name: Option<&str>, input: bool) -> Result<Opt
         )
     })
 }
+/// Available input and output stream configurations for the given device
+pub fn list_device_configs(name: &str, input: bool) -> Result<Vec<String>> {
+    let Some(device) = find_device(&cpal::default_host(), Some(name), input)? else {
+        return Ok(vec![]);
+    };
+
+    if input {
+        Ok(device
+            .supported_input_configs()?
+            .map(|c| format!("{:?}", c))
+            .collect())
+    } else {
+        Ok(device
+            .supported_output_configs()?
+            .map(|c| format!("{:?}", c))
+            .collect())
+    }
+}
 
 impl CpalBackend {
     /// `in_channels` and `out_channels` are opened on the devices as asked; a
@@ -117,6 +135,7 @@ impl AudioBackend for CpalBackend {
 
         let out_dev = find_device(&host, self.output_device.as_deref(), false)?
             .context("no output device available")?;
+
         let out_config = StreamConfig {
             channels: self.out_channels as u16,
             sample_rate: SampleRate(self.sample_rate),
@@ -184,8 +203,7 @@ impl AudioBackend for CpalBackend {
             Arc::clone(&errors),
         );
 
-        let out_stream = out_dev
-            .build_output_stream(
+        let out_stream = out_dev.build_output_stream(
                 &out_config,
                 move |data: &mut [f32], _| {
                     let total = data.len() / out_channels;

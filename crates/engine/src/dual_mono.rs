@@ -141,8 +141,8 @@ mod tests {
         use crate::MeterBank;
         use dspd_plugin_peak_meter::PeakMeter;
         let mut dm = DualMono::new(
-            Box::new(PeakMeter::new(48_000)),
-            Box::new(PeakMeter::new(48_000)),
+            Box::new(PeakMeter::new(48_000, 1)),
+            Box::new(PeakMeter::new(48_000, 1)),
             16,
         );
         let names: Vec<_> = dm.meter_specs().into_iter().map(|s| s.name).collect();

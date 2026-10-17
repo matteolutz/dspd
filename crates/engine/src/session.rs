@@ -220,30 +220,6 @@ impl NativeSpec {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct GainSpec {
-    #[serde(default)]
-    pub gain_db: f32,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct DynEqBandSpec {
-    pub freq: f32,
-    pub q: f32,
-    pub static_gain_db: f32,
-    pub threshold_db: f32,
-    pub ratio: f32,
-    pub range_db: f32,
-    pub attack_ms: f32,
-    pub release_ms: f32,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct DynEqSpec {
-    #[serde(default)]
-    bands: Vec<DynEqBandSpec>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct IrLoaderSpec {
     ir: PathBuf,
 }

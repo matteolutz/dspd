@@ -12,7 +12,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Fixed-size array of atomic `f32` values, shared between threads in an `Arc`.
 pub struct MeterBank {
@@ -125,7 +125,7 @@ impl OptionalMeterWriter for Option<MeterWriter> {
 }
 
 /// Where a meter lives and what it is, for the frontend.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MeterInfo {
     /// Position in the bank and in the `values` array the API streams.
     pub slot: usize,
