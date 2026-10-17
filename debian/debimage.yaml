@@ -10,6 +10,7 @@ actions:
     suite: {{ $suite }}
     components:
       - main
+      - non-free-firmware
     mirror: {{ $mirror }}
     variant: minbase
 
@@ -18,6 +19,15 @@ actions:
     packages:
       - linux-image-rt-amd64
       - linux-headers-rt-amd64
+      - sudo
+      - adduser
+      - openssh-server
+      - grub-pc
+
+  - action: run
+    description: Set up user
+    chroot: true
+    command: scripts/setup-user.sh {{ $adminusername }}
 
   - action: run
     description: Add hostname
@@ -26,7 +36,7 @@ actions:
 
   - action: image-partition
     imagename: {{ $image }}
-    imagesize: 2GB
+    imagesize: 3GB
     partitiontype: msdos
     mountpoints:
       - mountpoint: /
@@ -41,12 +51,16 @@ actions:
   - action: filesystem-deploy
     description: Deploying filesystem onto image
 
-  # Update U-Boot menu after creation of image partitions and filesystem
-  # deployment to get correct root information from /etc/fstab
   - action: run
-    description: Update U-Boot menu
+    description: Install GRUB Bootloader
     chroot: true
-    command: u-boot-update
+    command: grub-install --target=i386-pc /dev/loop0
+
+
+  - action: run
+    description: Update GRUB Menu
+    chroot: true
+    command: update-grub
 
   - action: run
     description: Compressing final image
