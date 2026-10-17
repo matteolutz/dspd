@@ -79,8 +79,3 @@ actions:
     description: Compressing final image
     postprocess: true
     command: gzip -f {{ $image }}
-
-  - action: run
-    description: Extract bootloader u-boot.bin
-    chroot: false
-    command: cp ${ROOTDIR}/usr/lib/u-boot/libretech-cc/u-boot.bin ${ARTIFACTDIR}/u-boot.bin
