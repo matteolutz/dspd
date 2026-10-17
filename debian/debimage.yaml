@@ -22,12 +22,19 @@ actions:
       - sudo
       - adduser
       - openssh-server
+      - zstd
+      - systemd-sysv
+      - util-linux
+      - initramfs-tools
+      - iproute2
+      - network-manager
+      - libnss-myhostname
       - grub-pc
 
   - action: run
     description: Set up user
     chroot: true
-    command: scripts/setup-user.sh {{ $adminusername }}
+    script: scripts/setup-user.sh {{ $adminusername }}
 
   - action: run
     description: Add hostname
