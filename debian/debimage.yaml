@@ -29,7 +29,8 @@ actions:
       - iproute2
       - network-manager
       - libnss-myhostname
-      - grub-pc
+      - grub-efi-amd64-bin
+      - grub-common
 
   - action: run
     description: Set up user
@@ -44,16 +45,21 @@ actions:
   - action: image-partition
     imagename: {{ $image }}
     imagesize: 3GB
-    partitiontype: msdos
+    partitiontype: gpt
     mountpoints:
       - mountpoint: /
         partition: root
+      - mountpoint: /boot/efi
+        partition: ESP
     partitions:
+      - name: ESP
+        fs: vfat
+        start: 1MB
+        end: 128MB
       - name: root
         fs: ext4
-        start: 2MB
+        start: 128MB
         end: 100%
-        flags: [ boot ]
 
   - action: filesystem-deploy
     description: Deploying filesystem onto image
@@ -61,8 +67,7 @@ actions:
   - action: run
     description: Install GRUB Bootloader
     chroot: true
-    command: grub-install --target=i386-pc /dev/loop0
-
+    command: grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable --no-nvram
 
   - action: run
     description: Update GRUB Menu
