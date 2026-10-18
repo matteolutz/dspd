@@ -41,7 +41,7 @@ actions:
     script: scripts/setup-user.sh {{ $adminusername }}
 
   - action: overlay
-    description: Copy configuration (audio, hostname) into image
+    description: Copy configuration (audio, hostname) and dspd binary into image
     source: overlay
 
   - action: image-partition
