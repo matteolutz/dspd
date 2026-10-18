@@ -33,6 +33,7 @@ actions:
       - grub-common
       - dosfstools
       - jackd2
+      - jack-example-tools
       - alsa-utils
       - vim
 
