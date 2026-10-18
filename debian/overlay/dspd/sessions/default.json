@@ -1,0 +1,16 @@
+{
+  "sample_rate": 44100,
+  "max_block": 256,
+  "strips": [
+    {
+      "name": "test",
+      "width": "stereo",
+      "input": 0,
+      "chain": [
+        {
+          "type": "peak_meter"
+        }
+      ]
+    }
+  ]
+}
