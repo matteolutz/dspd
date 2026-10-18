@@ -10,6 +10,7 @@ rust-version.workspace = true
 default = []
 # Live I/O through WASAPI / CoreAudio / ALSA / JACK. Needs libasound2-dev on Linux.
 cpal-backend = ["dep:cpal"]
+jack-backend = ["dep:jack"]
 
 [dependencies]
 dspd-engine.workspace = true
@@ -17,6 +18,7 @@ anyhow.workspace = true
 hound.workspace = true
 rtrb.workspace = true
 cpal = { workspace = true, optional = true }
+jack = { version = "0.13", optional = true, features = ["controller"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 cpal = { workspace = true, features = ["jack"], optional = true }

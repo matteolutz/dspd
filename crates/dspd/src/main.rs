@@ -127,6 +127,9 @@ enum BackendArg {
     /// Live audio through the OS audio API.
     #[cfg(feature = "cpal-backend")]
     Cpal,
+    /// Live audio through the JACK audio server (Linux/macOS). Requires the `jack-backend` feature.
+    #[cfg(feature = "jack-backend")]
+    Jack,
 }
 
 #[derive(clap::Args)]
@@ -499,6 +502,14 @@ fn serve(a: ServeArgs) -> Result<()> {
             }
             Box::new(b)
         }
+        #[cfg(feature = "jack-backend")]
+        BackendArg::Jack => Box::new(dspd_audio::JackBackend::new(
+            spec.input_channels(),
+            spec.output_channels(),
+            a.block,
+            spec.max_block,
+            spec.sample_rate,
+        )),
     };
 
     tracing::info!(

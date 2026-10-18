@@ -22,11 +22,17 @@ mod offline;
 #[cfg(feature = "cpal-backend")]
 mod cpal_backend;
 
+#[cfg(feature = "jack-backend")]
+mod jack_backend;
+
 pub use null::{NullBackend, Signal};
 pub use offline::{probe_wav, OfflineBackend, WavInfo};
 
 #[cfg(feature = "cpal-backend")]
 pub use cpal_backend::{list_device_configs, list_devices, list_hosts, CpalBackend};
+
+#[cfg(feature = "jack-backend")]
+pub use jack_backend::JackBackend;
 
 /// What a backend run produced.
 #[derive(Clone, Copy, Debug, Default)]

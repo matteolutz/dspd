@@ -1403,7 +1403,7 @@ dependencies = [
  "core-foundation-sys",
  "coreaudio-rs",
  "dasp_sample",
- "jack",
+ "jack 0.11.4",
  "jni 0.21.1",
  "js-sys",
  "libc",
@@ -1704,6 +1704,7 @@ dependencies = [
  "dspd-engine",
  "dspd-plugin-gain",
  "hound",
+ "jack 0.13.5",
  "rtrb",
  "tempfile",
 ]
@@ -3762,6 +3763,20 @@ dependencies = [
  "lazy_static",
  "libc",
  "log",
+]
+
+[[package]]
+name = "jack"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7811b07bcac5dafabf814ab52c4b0ca9b7948aa1e279f572f03aa6544d47d27"
+dependencies = [
+ "bitflags 2.13.2",
+ "jack-sys",
+ "lazy_static",
+ "libc",
+ "log",
+ "rtrb",
 ]
 
 [[package]]
