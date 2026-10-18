@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{BufferSize, Device, SampleRate, StreamConfig};
+use cpal::{BufferSize, Device, Host, SampleRate, StreamConfig};
 use dspd_engine::{AudioBlock, Processor};
 
 use crate::{AudioBackend, RunReport};
@@ -29,9 +29,43 @@ pub struct CpalBackend {
     use_input: bool,
 }
 
+fn find_host(host_name: &str) -> Host {
+    cpal::available_hosts()
+        .into_iter()
+        .find(|host| {
+            host.name()
+                .to_lowercase()
+                .contains(&host_name.to_lowercase())
+        })
+        .and_then(|host_id| cpal::host_from_id(host_id).ok())
+        .inspect(|host| println!("using host `{}`", host.id().name()))
+        .unwrap_or_else(|| {
+            let default_host = cpal::default_host();
+
+            println!(
+                "host `{}` not found, using default host `{}`",
+                host_name,
+                default_host.id().name()
+            );
+
+            default_host
+        })
+}
+
+/// Names of the available audio hosts (WASAPI, CoreAudio, ALSA, JACK, etc.).
+pub fn list_hosts() -> Vec<&'static str> {
+    cpal::available_hosts()
+        .into_iter()
+        .map(|host| host.name())
+        .collect()
+}
+
 /// Names of the available (input, output) devices on the default host.
-pub fn list_devices() -> Result<(Vec<String>, Vec<String>)> {
-    let host = cpal::default_host();
+pub fn list_devices(host_name: Option<&str>) -> Result<(Vec<String>, Vec<String>)> {
+    let host = host_name
+        .map(find_host)
+        .unwrap_or_else(|| cpal::default_host());
+
     let names = |devices: Result<Vec<Device>, _>| -> Vec<String> {
         devices
             .unwrap_or_default()

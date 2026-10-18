@@ -26,7 +26,7 @@ pub use null::{NullBackend, Signal};
 pub use offline::{probe_wav, OfflineBackend, WavInfo};
 
 #[cfg(feature = "cpal-backend")]
-pub use cpal_backend::{list_device_configs, list_devices, CpalBackend};
+pub use cpal_backend::{list_device_configs, list_devices, list_hosts, CpalBackend};
 
 /// What a backend run produced.
 #[derive(Clone, Copy, Debug, Default)]

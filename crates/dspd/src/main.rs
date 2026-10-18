@@ -51,9 +51,12 @@ enum Command {
     },
     /// List the built-in native plugins and their parameters.
     Plugins,
+    /// List audio hosts (cpal backend).
+    #[cfg(feature = "cpal-backend")]
+    Hosts,
     /// List audio devices (cpal backend).
     #[cfg(feature = "cpal-backend")]
-    Devices,
+    Devices(DevicesArgs),
     /// Get the supported stream configurations of an audio device (cpal backend).
     #[cfg(feature = "cpal-backend")]
     DeviceConfigs(DeviceConfigsArgs),
@@ -157,6 +160,13 @@ struct ServeArgs {
     no_input: bool,
 }
 
+#[derive(clap::Args)]
+struct DevicesArgs {
+    /// The CPAL host to use (substring match)..
+    #[arg(short, long)]
+    host: Option<String>,
+}
+
 #[derive(Copy, Clone, ValueEnum)]
 enum DeviceType {
     Input,
@@ -189,7 +199,9 @@ fn main() -> Result<()> {
         Command::Inspect { plugin } => inspect_plugin(&plugin),
         Command::Plugins => list_native_plugins(),
         #[cfg(feature = "cpal-backend")]
-        Command::Devices => devices(),
+        Command::Hosts => hosts(),
+        #[cfg(feature = "cpal-backend")]
+        Command::Devices(a) => devices(a),
         #[cfg(feature = "cpal-backend")]
         Command::DeviceConfigs(a) => device_configs(a),
     }
@@ -548,8 +560,16 @@ fn inspect_plugin(path: &Path) -> Result<()> {
 }
 
 #[cfg(feature = "cpal-backend")]
-fn devices() -> Result<()> {
-    let (inputs, outputs) = dspd_audio::list_devices()?;
+fn hosts() -> Result<()> {
+    let host_names = dspd_audio::list_hosts();
+    println!("hosts:");
+    host_names.iter().for_each(|d| println!("  {d}"));
+    Ok(())
+}
+
+#[cfg(feature = "cpal-backend")]
+fn devices(a: DevicesArgs) -> Result<()> {
+    let (inputs, outputs) = dspd_audio::list_devices(a.host.as_deref())?;
     println!("input devices:");
     inputs.iter().for_each(|d| println!("  {d}"));
     println!("output devices:");
