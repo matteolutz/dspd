@@ -143,7 +143,7 @@ impl AudioBackend for JackBackend {
         stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> anyhow::Result<crate::RunReport> {
         let started = std::time::Instant::now();
-        let (client, _) = jack::Client::new("dspd_jack", jack::ClientOptions::default())?;
+        let (client, _) = jack::Client::new("dspd", jack::ClientOptions::default())?;
 
         client.set_buffer_size(self.block_size as u32)?;
         if client.sample_rate() != self.sample_rate {
@@ -157,7 +157,7 @@ impl AudioBackend for JackBackend {
         let in_ports: Vec<_> = (0..self.in_channels)
             .map(|channel| {
                 client.register_port(
-                    format!("dspd_input_{}", channel).as_str(),
+                    format!("input_{}", channel).as_str(),
                     jack::AudioIn::default(),
                 )
             })
@@ -169,7 +169,7 @@ impl AudioBackend for JackBackend {
         let out_ports: Vec<_> = (0..self.out_channels)
             .map(|channel| {
                 client.register_port(
-                    format!("dspd_output_{}", channel).as_str(),
+                    format!("output_{}", channel).as_str(),
                     jack::AudioOut::default(),
                 )
             })
