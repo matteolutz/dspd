@@ -14,11 +14,15 @@ build package="" profile="debug":
 clean:
     cargo clean
 
-[group("development")]
+[group("debian")]
 debian debos="debos":
     @just --justfile {{justfile()}} build dspd release
     cp {{justfile_directory()}}/target/release/dspd {{justfile_directory()}}/debian/overlay/usr/local/bin/dspd
     sudo {{debos}} {{justfile_directory()}}/debian/debimage.yaml
+
+[group("debian")]
+flash device img="":
+	sudo bmaptool copy {{ if img =="" { f"{{justfile_directory()}}/debian-dspd-trixie.img.gz" } else { img } }} {{device}}
 
 [group("testing")]
 test package="":
