@@ -37,6 +37,7 @@ impl JackBackend {
     }
 }
 
+#[allow(unused)]
 enum DspdProcessorCommand {
     SetParam { id: u32, value: f64 },
 }
@@ -94,7 +95,8 @@ impl jack::contrib::controller::ControlledProcessorTrait for DspdProcessorWrappe
             Self::Notification,
         >,
     ) -> jack::Control {
-        println!("scope.n_frames() = {}", scope.n_frames());
+        // TODO: is this really, what we should do?
+        assert_eq!(scope.n_frames() as usize, self.input.frames());
 
         while let Some(cmd) = channels.recv_command() {
             match cmd {
