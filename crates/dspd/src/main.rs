@@ -136,9 +136,16 @@ struct ServeArgs {
     /// Address for the REST control API (it has no authentication).
     #[arg(long, default_value = "127.0.0.1:8080")]
     listen: SocketAddr,
+
     #[arg(long, value_enum, default_value_t = BackendArg::Null)]
     backend: BackendArg,
-    #[arg(long, default_value_t = 128)]
+
+    /// The CPAL host to use (substring match). Defaults to `cpal::default_host()`
+    #[cfg(feature = "cpal-backend")]
+    #[arg(long)]
+    cpal_host: Option<String>,
+
+    #[arg(short, long, default_value_t = 128)]
     block: usize,
     /// Test signal for the null backend.
     #[arg(long, value_enum, default_value_t = SignalArg::Sine)]
@@ -150,10 +157,10 @@ struct ServeArgs {
     #[arg(long)]
     pin_cpu: Option<usize>,
     /// cpal backend: input device name (substring match).
-    #[arg(long)]
+    #[arg(short, long)]
     input_device: Option<String>,
     /// cpal backend: output device name (substring match).
-    #[arg(long)]
+    #[arg(short, long)]
     output_device: Option<String>,
     /// cpal backend: do not capture; feed the chain silence.
     #[arg(long)]
@@ -162,7 +169,7 @@ struct ServeArgs {
 
 #[derive(clap::Args)]
 struct DevicesArgs {
-    /// The CPAL host to use (substring match)..
+    /// The CPAL host to use (substring match). Defaults to `cpal::default_host()`
     #[arg(short, long)]
     host: Option<String>,
 }
@@ -175,6 +182,9 @@ enum DeviceType {
 
 #[derive(clap::Args)]
 struct DeviceConfigsArgs {
+    /// The CPAL host to use (substring match). Defaults to `cpal::default_host()`
+    host: Option<String>,
+
     /// Input device name (substring match).
     #[arg(short, long)]
     device: String,
@@ -472,6 +482,7 @@ fn serve(a: ServeArgs) -> Result<()> {
         #[cfg(feature = "cpal-backend")]
         BackendArg::Cpal => {
             let mut b = dspd_audio::CpalBackend::new(
+                a.cpal_host,
                 spec.input_channels(),
                 spec.output_channels(),
                 a.block,
@@ -579,8 +590,11 @@ fn devices(a: DevicesArgs) -> Result<()> {
 
 #[cfg(feature = "cpal-backend")]
 fn device_configs(a: DeviceConfigsArgs) -> Result<()> {
-    let configs =
-        dspd_audio::list_device_configs(&a.device, matches!(a.r#type, DeviceType::Input))?;
+    let configs = dspd_audio::list_device_configs(
+        a.host.as_deref(),
+        &a.device,
+        matches!(a.r#type, DeviceType::Input),
+    )?;
 
     println!(
         "Supported {} configs:",

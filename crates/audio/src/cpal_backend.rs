@@ -20,6 +20,7 @@ use dspd_engine::{AudioBlock, Processor};
 use crate::{AudioBackend, RunReport};
 
 pub struct CpalBackend {
+    host_name: Option<String>,
     in_channels: usize,
     out_channels: usize,
     block_size: usize,
@@ -101,8 +102,16 @@ fn find_device(host: &cpal::Host, name: Option<&str>, input: bool) -> Result<Opt
     })
 }
 /// Available input and output stream configurations for the given device
-pub fn list_device_configs(name: &str, input: bool) -> Result<Vec<String>> {
-    let Some(device) = find_device(&cpal::default_host(), Some(name), input)? else {
+pub fn list_device_configs(
+    host_name: Option<&str>,
+    name: &str,
+    input: bool,
+) -> Result<Vec<String>> {
+    let host = host_name
+        .map(find_host)
+        .unwrap_or_else(|| cpal::default_host());
+
+    let Some(device) = find_device(&host, Some(name), input)? else {
         return Ok(vec![]);
     };
 
@@ -123,12 +132,14 @@ impl CpalBackend {
     /// `in_channels` and `out_channels` are opened on the devices as asked; a
     /// device that cannot provide that many channels makes `run` fail.
     pub fn new(
+        host_name: Option<String>,
         in_channels: usize,
         out_channels: usize,
         block_size: usize,
         sample_rate: u32,
     ) -> Self {
         Self {
+            host_name,
             in_channels,
             out_channels,
             block_size,
@@ -165,7 +176,11 @@ impl AudioBackend for CpalBackend {
         stop: Arc<AtomicBool>,
     ) -> Result<RunReport> {
         let started = Instant::now();
-        let host = cpal::default_host();
+        let host = self
+            .host_name
+            .as_deref()
+            .map(find_host)
+            .unwrap_or_else(|| cpal::default_host());
 
         let out_dev = find_device(&host, self.output_device.as_deref(), false)?
             .context("no output device available")?;
