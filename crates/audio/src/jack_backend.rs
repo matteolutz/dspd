@@ -94,6 +94,8 @@ impl jack::contrib::controller::ControlledProcessorTrait for DspdProcessorWrappe
             Self::Notification,
         >,
     ) -> jack::Control {
+        println!("scope.n_frames() = {}", scope.n_frames());
+
         while let Some(cmd) = channels.recv_command() {
             match cmd {
                 DspdProcessorCommand::SetParam { id, value } => self.set_param(id, value),
