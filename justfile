@@ -15,9 +15,10 @@ clean:
     cargo clean
 
 [group("development")]
-debian:
+debian debos="debos":
     @just --justfile {{justfile()}} build dspd release
     cp {{justfile_directory()}}/target/release/dspd {{justfile_directory()}}/debian/overlay/usr/bin/dspd
+    sudo {{debos}} {{justfile_directory()}}/debian/debimage.yaml
 
 [group("testing")]
 test package="":
