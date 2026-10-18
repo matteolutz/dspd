@@ -8,6 +8,10 @@
       "input": 0,
       "chain": [
         {
+          "type": "clap",
+          "path": "C:/Users/Matteo/Downloads/duskverb-windows/CLAP/DuskVerb.clap"
+        },
+        {
           "type": "peak_meter"
         }
       ]
