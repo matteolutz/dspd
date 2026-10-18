@@ -1,6 +1,9 @@
 use std::{
     ops::{Deref, DerefMut},
-    sync::atomic::Ordering,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -50,6 +53,9 @@ struct DspdProcessorWrapper {
 
     out_ports: Vec<jack::Port<jack::AudioOut>>,
     output: AudioBlock,
+
+    frames_count: Arc<AtomicU64>,
+    block_count: Arc<AtomicU64>,
 }
 
 impl DerefMut for DspdProcessorWrapper {
@@ -95,14 +101,16 @@ impl jack::contrib::controller::ControlledProcessorTrait for DspdProcessorWrappe
             Self::Notification,
         >,
     ) -> jack::Control {
-        // TODO: is this really, what we should do?
-        assert_eq!(scope.n_frames() as usize, self.input.frames());
-
         while let Some(cmd) = channels.recv_command() {
             match cmd {
                 DspdProcessorCommand::SetParam { id, value } => self.set_param(id, value),
             }
         }
+
+        // adjust the input and output buffers to the current block size
+        // `scope.n_frames()` should always be equal to the block size set in `buffer_size()`
+        self.input.set_frames(scope.n_frames() as usize);
+        self.output.set_frames(scope.n_frames() as usize);
 
         // move input data into the input buffer
         for (channel_idx, in_channel) in self.in_ports.iter().enumerate() {
@@ -119,6 +127,10 @@ impl jack::contrib::controller::ControlledProcessorTrait for DspdProcessorWrappe
             let out_data = out_channel.as_mut_slice(scope);
             out_data.copy_from_slice(processor_out_data);
         }
+
+        self.frames_count
+            .fetch_add(scope.n_frames() as u64, Ordering::Relaxed);
+        self.block_count.fetch_add(1, Ordering::Relaxed);
 
         jack::Control::Continue
     }
@@ -166,12 +178,18 @@ impl AudioBackend for JackBackend {
         let mut output = AudioBlock::new(out_ports.len(), self.max_block_size);
         output.set_frames(client.buffer_size() as usize);
 
+        let frames_count = Arc::new(AtomicU64::new(0));
+        let block_count = Arc::new(AtomicU64::new(0));
+
         let processor_wrapper = DspdProcessorWrapper {
             processor,
             in_ports,
             input,
             out_ports,
             output,
+
+            frames_count: frames_count.clone(),
+            block_count: frames_count.clone(),
         };
 
         let (processor_instance, mut handle) = processor_wrapper.instance(16, 16);
@@ -186,10 +204,13 @@ impl AudioBackend for JackBackend {
 
         active_client.deactivate()?;
 
+        let n_frames = frames_count.load(Ordering::Relaxed);
+        let n_blocks = block_count.load(Ordering::Relaxed);
+
         Ok(RunReport {
-            frames_in: 0,
-            frames_out: 0,
-            blocks: 0,
+            frames_in: n_frames,
+            frames_out: n_frames,
+            blocks: n_blocks,
             wall: started.elapsed(),
             stream_errors: 0,
         })
