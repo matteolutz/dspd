@@ -21,6 +21,7 @@ debian debos="debos":
     sudo {{debos}} {{justfile_directory()}}/debian/debimage.yaml
 
 [group("debian")]
+[confirm("Are you sure you want to flash the debian image to \"" + device + "\"? (y/N)")]
 flash device img="":
 	sudo bmaptool copy {{ if img =="" { f"{{justfile_directory()}}/debian-dspd-trixie.img.gz" } else { img } }} {{device}}
 
