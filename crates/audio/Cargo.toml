@@ -18,6 +18,9 @@ hound.workspace = true
 rtrb.workspace = true
 cpal = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { workspace = true, features = ["jack"], optional = true }
+
 [dev-dependencies]
 tempfile.workspace = true
 dspd-plugin-gain.workspace = true
