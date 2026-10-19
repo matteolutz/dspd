@@ -2,7 +2,10 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use tokio::sync::mpsc;
 
-use crate::aes67_backend::{error::Aes67Error, util::BufferReader};
+use crate::aes67_backend::{
+    error::{Aes67Error, Aes67Result},
+    util::BufferReader,
+};
 
 const MAX_SAP_LENGTH: usize = 4096;
 
@@ -13,7 +16,7 @@ enum SapAnnouncementAddressType {
 }
 
 impl SapAnnouncementAddressType {
-    fn from_u8(value: u8) -> Result<Self, Aes67Error> {
+    fn from_u8(value: u8) -> Aes67Result<Self> {
         match value {
             0 => Ok(SapAnnouncementAddressType::Ipv4),
             1 => Ok(SapAnnouncementAddressType::Ipv6),
@@ -29,7 +32,7 @@ enum SapAnnouncementMessageType {
 }
 
 impl SapAnnouncementMessageType {
-    fn from_u8(value: u8) -> Result<Self, Aes67Error> {
+    fn from_u8(value: u8) -> Aes67Result<Self> {
         match value {
             0 => Ok(SapAnnouncementMessageType::Announcement),
             1 => Ok(SapAnnouncementMessageType::Deletion),
@@ -68,7 +71,11 @@ struct SapAnnouncementHeader {
     payload_type: String,
 }
 
-pub struct SapAnnouncement {}
+#[derive(Debug)]
+pub struct SapAnnouncement {
+    pub header: SapAnnouncementHeader,
+    pub sdp: sdp_rs::SessionDescription,
+}
 
 pub struct SapListener {
     rx: mpsc::Receiver<SapAnnouncement>,
@@ -76,12 +83,8 @@ pub struct SapListener {
 }
 
 impl SapListener {
-    pub fn bind(
-        multicast_group: Ipv4Addr,
-        interface: Ipv4Addr,
-        port: u16,
-    ) -> Result<Self, Aes67Error> {
-        let socket = std::net::UdpSocket::bind((interface, port)).unwrap();
+    pub fn bind(multicast_group: Ipv4Addr, interface: Ipv4Addr, port: u16) -> Aes67Result<Self> {
+        let socket = std::net::UdpSocket::bind((interface, port))?;
         socket.join_multicast_v4(&multicast_group.into(), &interface)?;
         let socket = tokio::net::UdpSocket::from_std(socket)?;
 
@@ -98,14 +101,18 @@ impl SapListener {
                     }
                 };
 
-                let Ok(announcement) = Self::parse_sap_announcement(&buffer[..len]) else {
-                    eprintln!("Failed to parse SAP announcement");
-                    continue;
+                let announcement = match Self::parse_sap_announcement(&buffer[..len]) {
+                    Ok(announcement) => announcement,
+                    Err(e) => {
+                        eprintln!("Failed to parse SAP announcement: {}", e);
+                        continue;
+                    }
                 };
 
-                // Here you would parse the SAP announcement from the buffer
-                // For now, we just print the raw data
-                println!("Received SAP packet: {:?}", &buffer[..len]);
+                if let Err(_) = tx.send(announcement).await {
+                    eprintln!("Receiver dropped, stopping SAP listener");
+                    break;
+                }
             }
         });
 
@@ -177,39 +184,13 @@ impl SapListener {
             payload_type,
         };
 
-        println!("Parsed SAP announcement header: {:?}", header);
+        let payload = String::from_utf8_lossy(reader.bytes()).to_string();
+        let sdp = sdp_rs::SessionDescription::try_from(payload)?;
 
-        Ok(SapAnnouncement {})
+        Ok(SapAnnouncement { header, sdp })
     }
 
     pub async fn recv(&mut self) -> Option<SapAnnouncement> {
         self.rx.recv().await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::net::Ipv4Addr;
-
-    use crate::aes67_backend::sap::SapListener;
-
-    #[test]
-    fn hello_world() {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let mut client = SapListener::bind(
-                    Ipv4Addr::new(239, 255, 255, 255),
-                    Ipv4Addr::new(192, 168, 2, 100),
-                    9875,
-                )
-                .unwrap();
-
-                loop {
-                    client.recv().await;
-                }
-            });
     }
 }
