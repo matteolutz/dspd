@@ -131,7 +131,7 @@ pub struct MeterInfo {
     pub slot: usize,
 
     pub strip: usize,
-    pub stage: usize,
+    pub stage: u32,
     /// The CLAP parameter id for CLAP plugins; for native processors, whatever id they declared.
     pub param_id: u32,
     pub name: String,

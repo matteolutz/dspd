@@ -1,4 +1,11 @@
-use crate::{AudioBlock, BoxedProcessor, Processor};
+use crate::{AudioBlock, BoxedProcessor, ClapSpec, Processor};
+
+/// Builds CLAP stages. Implemented by the host (the binary), which keeps this
+/// crate free of plugin-format code.
+pub trait StageFactory: Send + Sync {
+    /// Load a CLAP stage for a strip that is `width` channels wide (1 or 2).
+    fn load_clap(&self, spec: &ClapSpec, width: usize) -> Result<BoxedProcessor, String>;
+}
 
 /// One processor in a chain, with a human-readable label.
 pub struct Stage {
@@ -6,21 +13,33 @@ pub struct Stage {
     pub processor: BoxedProcessor,
 }
 
+/// Most stages a chain can hold. Room for this many is reserved up front, so
+/// inserting a stage on the audio thread never allocates.
+pub const MAX_STAGES: usize = 64;
+
 /// Processors run in series on a fixed channel count.
 ///
 /// Two scratch blocks are ping-ponged between stages, so `process` never
 /// allocates. The block passed in must not exceed `max_frames`.
 pub struct Chain {
     stages: Vec<Stage>,
+    stage_order: Vec<u32>,
+
     a: AudioBlock,
     b: AudioBlock,
     channels: usize,
 }
 
 impl Chain {
-    pub fn new(channels: usize, max_frames: usize, stages: Vec<Stage>) -> Self {
+    pub fn new(channels: usize, max_frames: usize, mut stages: Vec<Stage>) -> Self {
+        let n = stages.len();
+        stages.reserve(MAX_STAGES.saturating_sub(n));
+        let mut stage_order = Vec::with_capacity(MAX_STAGES.max(n));
+        stage_order.extend(0..n as u32);
+
         Self {
             stages,
+            stage_order,
             a: AudioBlock::new(channels, max_frames),
             b: AudioBlock::new(channels, max_frames),
             channels,
@@ -43,6 +62,16 @@ impl Chain {
         &mut self.stages
     }
 
+    pub fn stage_order(&self) -> &[u32] {
+        &self.stage_order
+    }
+
+    /// Where the stage with the given ID is in the chain.
+    /// Returns `None` if the stage is not in the chain.
+    pub fn position_of(&self, stage_id: u32) -> Option<usize> {
+        self.stage_order.iter().position(|&id| id == stage_id)
+    }
+
     /// Sum of the latencies of all stages.
     pub fn total_latency_frames(&self) -> u32 {
         self.stages
@@ -51,11 +80,54 @@ impl Chain {
             .sum()
     }
 
-    /// Route a parameter change to one stage. Out-of-range stages are ignored.
-    pub fn set_param(&mut self, stage: usize, id: u32, value: f64) {
-        if let Some(s) = self.stages.get_mut(stage) {
-            s.processor.set_param(id, value);
+    /// Route a parameter change to the stage with id `stage`. Unknown ids are ignored.
+    pub fn set_param(&mut self, stage_id: u32, id: u32, value: f64) {
+        if let Some(pos) = self.position_of(stage_id) {
+            self.stages[pos].processor.set_param(id, value);
         }
+    }
+
+    /// Insert `stage` at `index` (clamped to the end) under a new id.
+    /// Never allocates: if the reserved room is used up, or the id is already
+    /// taken, the stage is handed back.
+    pub fn insert(&mut self, index: usize, id: u32, stage: Stage) -> Result<(), Stage> {
+        let full = self.stages.len() >= self.stages.capacity()
+            || self.stage_order.len() >= self.stage_order.capacity();
+        if full || self.position_of(id).is_some() {
+            return Err(stage);
+        }
+
+        let index = index.min(self.stages.len());
+
+        self.stages.insert(index, stage);
+        self.stage_order.insert(index, id);
+
+        Ok(())
+    }
+
+    /// Take a stage out of the chain. The caller must dispose of it off the audio thread.
+    pub fn remove(&mut self, id: u32) -> Option<Stage> {
+        let pos = self.position_of(id)?;
+        self.stage_order.remove(pos);
+        Some(self.stages.remove(pos))
+    }
+
+    /// Move a stage so it ends up at position `to` (clamped). Returns false for an unknown id.
+    pub fn move_to(&mut self, id: u32, to_pos: usize) -> bool {
+        let Some(from_pos) = self.position_of(id) else {
+            return false;
+        };
+
+        let to_pos = to_pos.min(self.stages.len() - 1);
+        if from_pos < to_pos {
+            self.stages[from_pos..=to_pos].rotate_left(1);
+            self.stage_order[from_pos..=to_pos].rotate_left(1);
+        } else if to_pos < from_pos {
+            self.stages[to_pos..=from_pos].rotate_right(1);
+            self.stage_order[to_pos..=from_pos].rotate_right(1);
+        }
+
+        true
     }
 }
 

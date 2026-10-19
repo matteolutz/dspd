@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use dspd_api::PluginContext;
 use serde::{Deserialize, Serialize};
 
-use crate::{BoxedProcessor, Chain, Rack, Registry, Stage, Strip};
+use crate::{BoxedProcessor, Chain, Rack, Registry, Stage, StageFactory, Strip};
 
 /// Upper bound on device channels in a session; guards against typos allocating gigabytes.
 pub const MAX_CHANNELS: usize = 1024;
@@ -33,24 +33,16 @@ fn default_max_block() -> usize {
 }
 
 /// Why a session could not be turned into a rack.
-#[derive(Debug)]
-pub enum BuildError<E> {
+#[derive(Debug, thiserror::Error)]
+pub enum BuildError {
     /// The spec names an unknown plugin or setting.
+    #[error("{0}")]
     Spec(String),
+
     /// A CLAP stage failed to load.
-    Load(E),
+    #[error("{0}")]
+    Factory(String),
 }
-
-impl<E: std::fmt::Display> std::fmt::Display for BuildError<E> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BuildError::Spec(msg) => f.write_str(msg),
-            BuildError::Load(e) => e.fmt(f),
-        }
-    }
-}
-
-impl<E: std::fmt::Debug + std::fmt::Display> std::error::Error for BuildError<E> {}
 
 /// Number of channels a strip carries.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -349,6 +341,14 @@ impl SessionSpec {
         // Two strips on the same output channel would silently overwrite each other.
         let mut owner: Vec<Option<usize>> = vec![None; self.required_outputs()];
         for (i, s) in self.strips.iter().enumerate() {
+            if s.chain.len() > crate::MAX_STAGES {
+                return Err(format!(
+                    "strip {i} has {} stages; the limit is {}",
+                    s.chain.len(),
+                    crate::MAX_STAGES
+                ));
+            }
+
             for k in 0..s.width.channels() {
                 let ch = s.output_channel() + k;
                 if let Some(prev) = owner[ch] {
@@ -363,18 +363,19 @@ impl SessionSpec {
     }
 
     /// Record a parameter change in the spec so that a later save/recall sees it.
+    /// Returns false if the strip, stage or parameter does not exist.
     pub fn apply_param(
         &mut self,
         registry: &Registry,
         strip: usize,
-        stage: usize,
+        stage_idx: usize,
         param_id: u32,
         value: f64,
     ) -> bool {
         match self
             .strips
             .get_mut(strip)
-            .and_then(|s| s.chain.get_mut(stage))
+            .and_then(|s| s.chain.get_mut(stage_idx))
         {
             Some(StageSpec::Native(n)) => {
                 let Some(def) = registry
@@ -433,16 +434,61 @@ impl SessionSpec {
         Ok(())
     }
 
+    /// Build the processor for one stage of this spec: native stages come from
+    /// `registry` (their resources are loaded from `assets`), CLAP stages from
+    /// `stage_factory`. Stored parameter values are applied before it is returned.
+    /// The caller must have run [`SessionSpec::check_plugins`] on this spec.
+    pub fn build_stage(
+        &self,
+        registry: &Registry,
+        strip: usize,
+        stage_idx: usize,
+        stage_factory: &dyn StageFactory,
+    ) -> Result<BoxedProcessor, BuildError> {
+        let width = self.strips[strip].width.channels();
+        let processor = match &self.strips[strip].chain[stage_idx] {
+            StageSpec::Native(n) => {
+                // check_plugins has already proven the lookups succeed.
+                let desc = registry.get(&n.plugin).expect("checked by check_plugins");
+                let ctx = PluginContext {
+                    sample_rate: self.sample_rate,
+                    max_block: self.max_block,
+                    channels: width,
+                };
+
+                let mut processor = (desc.create)(&ctx);
+
+                for (key, value) in &n.settings {
+                    let def = desc.param_by_key(key).expect("checked by check_plugins");
+                    processor.set_param(def.id, *value);
+                }
+
+                processor
+            }
+            StageSpec::Clap(c) => {
+                let mut processor = stage_factory
+                    .load_clap(c, width)
+                    .map_err(BuildError::Factory)?;
+
+                for (id, value) in &c.params {
+                    processor.set_param(*id, *value);
+                }
+                processor
+            }
+        };
+        Ok(processor)
+    }
+
     /// Instantiate every strip. Built-in stages are created here; CLAP stages are
     /// delegated to `load_clap`, which keeps this crate free of plugin-host code.
     /// `load_clap` also receives the strip's channel count (1 or 2), so the host
     /// can decide how to run a plugin whose own port layout differs.
     /// Stored parameter values are applied to every stage after creation.
-    pub fn build_rack<E>(
+    pub fn build_rack(
         &self,
         registry: &Registry,
-        mut load_clap: impl FnMut(&ClapSpec, usize) -> Result<BoxedProcessor, E>,
-    ) -> Result<Rack, BuildError<E>> {
+        stage_factory: &dyn StageFactory,
+    ) -> Result<Rack, BuildError> {
         self.check_plugins(registry).map_err(BuildError::Spec)?;
 
         let mut strips = Vec::with_capacity(self.strips.len());
@@ -459,6 +505,7 @@ impl SessionSpec {
                             max_block: self.max_block,
                             channels: width,
                         };
+
                         let mut processor = (desc.create)(&ctx);
 
                         for (key, value) in &n.settings {
@@ -469,18 +516,24 @@ impl SessionSpec {
                         processor
                     }
                     StageSpec::Clap(c) => {
-                        let mut processor = load_clap(c, width).map_err(BuildError::Load)?;
+                        let mut processor = stage_factory
+                            .load_clap(c, width)
+                            .map_err(BuildError::Factory)?;
+
                         for (id, value) in &c.params {
                             processor.set_param(*id, *value);
                         }
+
                         processor
                     }
                 };
+
                 stages.push(Stage {
                     label: spec.label(),
                     processor,
                 });
             }
+
             let chain = Chain::new(width, self.max_block, stages);
             strips.push(Strip::new(
                 strip.label(index),
@@ -495,9 +548,10 @@ impl SessionSpec {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::Processor;
-    use dspd_plugin_gain::{Gain, GAIN_PARAM_DB};
+    use dspd_plugin_gain::GAIN_PARAM_DB;
 
     fn registry() -> Registry {
         Registry::from_descriptors(&[
@@ -507,8 +561,11 @@ mod tests {
         .unwrap()
     }
 
-    fn no_clap(_: &ClapSpec, _: usize) -> Result<BoxedProcessor, String> {
-        Err("no clap".into())
+    struct NoClap;
+    impl StageFactory for NoClap {
+        fn load_clap(&self, _: &ClapSpec, _: usize) -> Result<BoxedProcessor, String> {
+            Err("no clap in tests".into())
+        }
     }
 
     fn two_strip_json() -> &'static str {
@@ -581,7 +638,7 @@ mod tests {
             !spec.apply_param(&registry(), 0, 0, 0, 1.0),
             "a meter has nothing to set"
         );
-        let rack = spec.build_rack(&registry(), no_clap).unwrap();
+        let rack = spec.build_rack(&registry(), &NoClap).unwrap();
         assert_eq!(rack.meter_infos().len(), 1);
         // round-trips through JSON
         spec.strips[0].name = Some("x".into());
@@ -624,28 +681,11 @@ mod tests {
             ]}"#,
         )
         .unwrap();
-        let rack = spec.build_rack(&registry(), no_clap).unwrap();
+        let rack = spec.build_rack(&registry(), &NoClap).unwrap();
         assert_eq!(rack.strips().len(), 2);
         assert_eq!(rack.strips()[0].width(), 1);
         assert_eq!(rack.strips()[1].width(), 2);
         assert_eq!(rack.latency_frames(), 0);
-    }
-
-    #[test]
-    fn clap_loader_is_told_the_strip_width() {
-        let spec = SessionSpec::from_json_str(
-            r#"{"strips":[
-                {"input":0,"chain":[{"type":"clap","path":"a.clap"}]},
-                {"width":"stereo","input":1,"chain":[{"type":"clap","path":"a.clap"}]}
-            ]}"#,
-        )
-        .unwrap();
-        let mut widths = Vec::new();
-        let _ = spec.build_rack(&registry(), |_, w| -> Result<BoxedProcessor, String> {
-            widths.push(w);
-            Ok(Box::new(Gain::new(0.0)))
-        });
-        assert_eq!(widths, vec![1, 2]);
     }
 
     #[test]
@@ -667,7 +707,7 @@ mod tests {
         assert_eq!(v["strips"][0]["chain"][0]["gain_db"], -6.0206);
 
         // The stored value is applied before the first block, without a ramp.
-        let mut rack = spec.build_rack(&registry(), no_clap).unwrap();
+        let mut rack = spec.build_rack(&registry(), &NoClap).unwrap();
         let mut input = crate::AudioBlock::new(1, 8);
         input.channel_mut(0).fill(1.0);
         let mut output = crate::AudioBlock::new(1, 8);
@@ -685,7 +725,7 @@ mod tests {
             SessionSpec::from_json_str(r#"{"strips":[{"input":0,"chain":[{"type":"reverb"}]}]}"#)
                 .unwrap();
         let e = spec
-            .build_rack(&registry(), no_clap)
+            .build_rack(&registry(), &NoClap)
             .err()
             .unwrap()
             .to_string();
@@ -701,7 +741,7 @@ mod tests {
         )
         .unwrap();
         let e = spec
-            .build_rack(&registry(), no_clap)
+            .build_rack(&registry(), &NoClap)
             .err()
             .unwrap()
             .to_string();

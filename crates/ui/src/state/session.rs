@@ -97,10 +97,7 @@ impl Strip {
             chain: strip
                 .chain
                 .into_iter()
-                .enumerate()
-                .map(|(stage_idx, stage)| {
-                    Stage::from_serializable(strip_idx, stage_idx, stage, meters.clone())
-                })
+                .map(|stage| Stage::from_serializable(strip_idx, stage.id, stage, meters.clone()))
                 .collect(),
         }
     }
@@ -110,8 +107,10 @@ impl Strip {
 pub struct SerializableStage {
     r#type: String,
 
+    id: u32,
+
     #[serde(flatten)]
-    settings: BTreeMap<String, f64>,
+    settings: BTreeMap<String, serde_json::Value>,
 }
 
 pub struct Stage {
@@ -120,11 +119,11 @@ pub struct Stage {
 
     /// The strip idx in the strip list of a session
     strip_idx: usize,
-    /// The stages idx in the stage list of a strip
-    stage_idx: usize,
+
+    stage_id: u32,
     pub(crate) r#type: SharedString,
 
-    pub(crate) settings: BTreeMap<String, f64>,
+    pub(crate) settings: BTreeMap<String, serde_json::Value>,
 }
 
 impl Stage {
@@ -136,21 +135,21 @@ impl Stage {
             .upgrade()
             .expect("MetersState entity has been dropped")
             .read(cx)
-            .meters_for_stage(self.strip_idx, self.stage_idx)
+            .meters_for_stage(self.strip_idx, self.stage_id)
     }
 }
 
 impl Stage {
     pub fn from_serializable(
         strip_idx: usize,
-        stage_idx: usize,
+        stage_id: u32,
         stage: SerializableStage,
         meters: WeakEntity<MetersState>,
     ) -> Self {
         Self {
             meters,
             strip_idx,
-            stage_idx,
+            stage_id,
             r#type: SharedString::from(stage.r#type),
             settings: stage.settings,
         }

@@ -11,17 +11,24 @@
 
 use std::sync::Arc;
 
-use crate::{AudioBlock, Chain, MeterBank, MeterInfo, MeterWriter, Processor};
+use crate::{
+    edit::{EditBatch, EditOp, Retired},
+    AudioBlock, Chain, MeterBank, MeterInfo, MeterWriter, Processor,
+};
+
+/// Slots in the meter bank. Stages added while running claim slots from this
+/// fixed room, because the bank is shared with the control side and cannot grow.
+pub const METER_CAPACITY: usize = 4096;
 
 /// Fixed delay used to line up strips whose chains report different latencies.
-struct DelayLine {
+pub struct DelayLine {
     buf: Vec<Vec<f32>>,
     pos: usize,
     len: usize,
 }
 
 impl DelayLine {
-    fn new(channels: usize, frames: usize) -> Self {
+    pub(crate) fn new(channels: usize, frames: usize) -> Self {
         Self {
             buf: vec![vec![0.0; frames]; channels],
             pos: 0,
@@ -131,29 +138,32 @@ impl Rack {
         // Ask every stage which meters it has, allocate one bank for all of them,
         // and hand each stage the writer for its own window.
         let mut infos = Vec::new();
-        let mut windows = Vec::new(); // (strip, stage, first slot, count)
-        for (si, strip) in strips.iter().enumerate() {
-            for (ti, stage) in strip.chain.stages().iter().enumerate() {
+        let mut windows = Vec::new(); // (strip, stage_idx, first slot, count)
+        for (strip_idx, strip) in strips.iter().enumerate() {
+            let chain_stage_order = strip.chain.stage_order();
+
+            for (stage_idx, stage) in strip.chain.stages().iter().enumerate() {
                 let specs = stage.processor.meter_specs();
                 if specs.is_empty() {
                     continue;
                 }
-                windows.push((si, ti, infos.len(), specs.len()));
+
+                windows.push((strip_idx, stage_idx, infos.len(), specs.len()));
                 for spec in specs {
                     infos.push(MeterInfo {
                         slot: infos.len(),
-                        strip: si,
-                        stage: ti,
+                        strip: strip_idx,
+                        stage: chain_stage_order[stage_idx],
                         param_id: spec.param_id,
                         name: spec.name,
                     });
                 }
             }
         }
-        let meters = MeterBank::new(infos.len());
-        for (si, ti, base, len) in windows {
+        let meters = MeterBank::new(infos.len().max(METER_CAPACITY));
+        for (strip_idx, stage_idx, base, len) in windows {
             let writer = MeterWriter::new(Arc::clone(&meters), base, len);
-            strips[si].chain.stages_mut()[ti]
+            strips[strip_idx].chain.stages_mut()[stage_idx]
                 .processor
                 .attach_meters(writer);
         }
@@ -180,11 +190,63 @@ impl Rack {
         &self.strips
     }
 
-    /// Route a parameter change to one stage of one strip. Out-of-range
+    /// Route a parameter change to one stage of one strip. `stage` is the stage's
+    /// id (its position until the first insert/remove/move). Unknown
     /// addresses are ignored.
-    pub fn set_param(&mut self, strip: usize, stage: usize, id: u32, value: f64) {
+    pub fn set_param(&mut self, strip: usize, stage: u32, id: u32, value: f64) {
         if let Some(s) = self.strips.get_mut(strip) {
             s.chain.set_param(stage, id, value);
+        }
+    }
+}
+
+impl Rack {
+    /// Apply one edit batch on the audio thread. Allocation-free: stages go
+    /// into room reserved earlier, and everything that is taken out is parked
+    /// in `batch.retired` (whose capacity the control side reserved) so it can
+    /// be freed on another thread.
+    pub fn apply_edit(&mut self, batch: &mut EditBatch) {
+        for op in batch.ops.drain(..) {
+            match op {
+                EditOp::Insert {
+                    strip,
+                    index,
+                    id,
+                    stage,
+                } => match self.strips.get_mut(strip as usize) {
+                    Some(s) => {
+                        if let Err(stage) = s.chain.insert(index as usize, id, stage) {
+                            // insert hands back the stage if it cannot be added, so we can retire it.
+                            batch.retired.push(Retired::Stage(stage));
+                        }
+                    }
+                    None => batch.retired.push(Retired::Stage(stage)),
+                },
+                EditOp::Remove { strip, id } => {
+                    if let Some(stage) = self
+                        .strips
+                        .get_mut(strip as usize)
+                        .and_then(|s| s.chain.remove(id))
+                    {
+                        batch.retired.push(Retired::Stage(stage));
+                    }
+                }
+                EditOp::Move { strip, id, to } => {
+                    if let Some(s) = self.strips.get_mut(strip as usize) {
+                        s.chain.move_to(id, to as usize);
+                    }
+                }
+                EditOp::SetCompensation { strip, delay } => {
+                    match self.strips.get_mut(strip as usize) {
+                        Some(s) => batch.retired.push(Retired::Delay(std::mem::replace(
+                            &mut s.compensation,
+                            delay,
+                        ))),
+                        None => batch.retired.push(Retired::Delay(delay)),
+                    }
+                }
+                EditOp::SetLatency { frames } => self.latency = frames,
+            }
         }
     }
 }
