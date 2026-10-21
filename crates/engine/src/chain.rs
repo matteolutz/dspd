@@ -1,4 +1,6 @@
-use crate::{AudioBlock, BoxedProcessor, ClapSpec, Processor};
+use dspd_api::ClapSpec;
+
+use crate::{AudioBlock, BoxedProcessor, Processor};
 
 /// Builds CLAP stages. Implemented by the host (the binary), which keeps this
 /// crate free of plugin-format code.

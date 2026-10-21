@@ -14,16 +14,22 @@ pub struct EngineStats {
 }
 
 impl EngineStats {
-    pub(super) fn start_fetching(cx: &mut App) -> (Entity<Self>, Task<()>) {
+    pub(super) fn start_fetching(
+        server_url: &reqwest::Url,
+        cx: &mut App,
+    ) -> (Entity<Self>, Task<()>) {
         let stats_entity = cx.new(|_| Self::default());
+        let stats_url = server_url.join("/stats").expect("Failed to join URL");
 
         let task = cx.spawn({
             let stats_entity = stats_entity.clone();
+
             async move |cx| loop {
+                let stats_url = stats_url.clone();
+
                 let body: reqwest::Result<String> = cx
                     .background_spawn(async move {
-                        let body = reqwest::blocking::get("http://localhost:8080/stats")
-                            .and_then(|res| res.text());
+                        let body = reqwest::blocking::get(stats_url).and_then(|res| res.text());
 
                         body
                     })

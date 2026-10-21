@@ -30,6 +30,8 @@
 //! The API has no authentication. `dspd serve` binds to 127.0.0.1 by default;
 //! put it behind something that does authenticate before exposing it.
 
+mod ws;
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -49,6 +51,8 @@ use dspd_engine::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
+
+use crate::ws::{WebSocketEvent, WebSocketExt};
 
 /// Everything that belongs to one running engine. A restart hands out a new set.
 pub struct EngineHandles {
@@ -79,6 +83,8 @@ pub struct ControlState {
     /// Requests that talk to the engine hold this for reading; a restart holds it for
     /// writing, so nothing reaches a half-replaced engine.
     gate: tokio::sync::RwLock<()>,
+
+    event_tx: tokio::sync::broadcast::Sender<WebSocketEvent>,
 }
 
 impl ControlState {
@@ -102,6 +108,7 @@ impl ControlState {
             generation: AtomicU64::new(0),
             engine_up: AtomicBool::new(true),
             gate: tokio::sync::RwLock::new(()),
+            event_tx: tokio::sync::broadcast::channel(16).0,
         }
     }
 
@@ -189,6 +196,8 @@ async fn get_session(State(s): State<Shared>) -> Json<Value> {
     let session = lock(&s.session);
     let mut value = serde_json::to_value(&*session).unwrap_or(Value::Null);
     let editor = lock(&s.editor);
+
+    // TODO: this is kinda hacky, maybe introduce a new type for this
     if let Some(strips) = value.get_mut("strips").and_then(Value::as_array_mut) {
         for (si, strip) in strips.iter_mut().enumerate() {
             let ids = editor.as_ref().and_then(|e| e.stage_ids(si));
@@ -206,6 +215,7 @@ async fn get_session(State(s): State<Shared>) -> Json<Value> {
             }
         }
     }
+
     Json(value)
 }
 
@@ -262,6 +272,14 @@ async fn set_param(
         ));
     }
     *session = candidate;
+
+    _ = s.event_tx.send(WebSocketEvent::ParamChanged {
+        strip: req.strip,
+        stage_id: req.stage,
+        param_id: req.param_id,
+        value: req.value,
+    });
+
     Ok((StatusCode::ACCEPTED, Json(json!({ "status": "queued" }))))
 }
 
@@ -463,56 +481,58 @@ struct WsQuery {
     hz: Option<u32>,
 }
 
-#[derive(Serialize)]
-struct MeterFrame<'a> {
-    r#type: &'static str,
-    values: &'a [f32],
-}
-
-async fn ws_meters(
+async fn ws(
     ws: WebSocketUpgrade,
     State(s): State<Shared>,
     Query(q): Query<WsQuery>,
 ) -> impl IntoResponse {
     let hz = q.hz.unwrap_or(DEFAULT_METER_HZ).clamp(1, MAX_METER_HZ);
-    ws.on_upgrade(move |socket| stream_meters(socket, s, hz))
+    ws.on_upgrade(move |socket| ws_stream(socket, s, hz))
 }
 
 /// Push the meter bank to one client at a fixed rate until it disconnects.
 /// Reads are relaxed atomic loads, so any number of clients cost the audio thread nothing.
 /// When edits add or remove meters, a `layout` frame carries the new list.
-async fn stream_meters(mut socket: WebSocket, s: Shared, hz: u32) {
+async fn ws_stream(mut socket: WebSocket, s: Shared, hz: u32) {
     let mut generation = s.generation.load(Ordering::Acquire);
     let mut version = s.meter_version.load(Ordering::Acquire);
     let mut infos = s.meter_infos();
-    let hello = json!({ "type": "hello", "hz": hz, "meters": &*infos }).to_string();
-    if socket.send(Message::Text(hello.into())).await.is_err() {
+
+    let mut event_rx = s.event_tx.subscribe();
+
+    if socket
+        .send_dspd_event(WebSocketEvent::MeterLayout {
+            meters: infos.to_vec(),
+            hz: Some(hz),
+        })
+        .await
+        .is_err()
+    {
         return;
     }
 
     let mut tick = tokio::time::interval(Duration::from_millis(1000 / u64::from(hz)));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut values: Vec<f32> = Vec::new();
+
     loop {
         tokio::select! {
             _ = tick.tick() => {
                 let current_generation = s.generation.load(Ordering::Acquire);
                 if current_generation != generation {
                     generation = current_generation;
-                    let restarted = json!({ "type": "restarted", "generation": generation }).to_string();
-                    if socket.send(Message::Text(restarted.into())).await.is_err() {
-                        break;
-                    }
+                    _ = socket.send_dspd_event(WebSocketEvent::Restarted { generation }).await;
                 }
 
                 let current = s.meter_version.load(Ordering::Acquire);
                 if current != version {
                     version = current;
                     infos = s.meter_infos();
-                    let layout = json!({ "type": "layout", "meters": &*infos }).to_string();
-                    if socket.send(Message::Text(layout.into())).await.is_err() {
-                        break;
-                    }
+                    _ = socket
+                        .send_dspd_event(WebSocketEvent::MeterLayout {
+                            meters: infos.to_vec(),
+                            hz: None,
+                        });
                 }
 
                 // values[i] belongs to the meter in slot i; slots past the last used one are not sent.
@@ -520,11 +540,17 @@ async fn stream_meters(mut socket: WebSocket, s: Shared, hz: u32) {
                 let used = infos.iter().map(|i| i.slot + 1).max().unwrap_or(0).min(bank.len());
                 values.clear();
                 values.extend((0..used).map(|i| bank.get(i)));
-                let Ok(frame) = serde_json::to_string(&MeterFrame { r#type: "meters", values: &values }) else { break };
-                if socket.send(Message::Text(frame.into())).await.is_err() {
-                    break;
-                }
+
+                _ = socket.send_dspd_event(WebSocketEvent::Meters { values: values.clone() }).await;
             }
+            event = event_rx.recv() => match event {
+                Ok(evt) => {
+                    _ = socket.send_dspd_event(evt);
+                }
+                Err(_) => {
+                    // Handle channel closed / lagged error if needed
+                }
+            },
             incoming = socket.recv() => match incoming {
                 // Closed, errored, or a close frame: stop. Anything else the client sends is ignored.
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
@@ -548,7 +574,7 @@ pub fn router(state: Shared) -> Router {
         .route("/strips/{strip}/stages/{id}", delete(remove_stage))
         .route("/strips/{strip}/stages/{id}/move", post(move_stage))
         .route("/strips/{strip}/order", put(set_order))
-        .route("/ws", get(ws_meters))
+        .route("/ws", get(ws))
         .with_state(state)
 }
 
@@ -565,8 +591,7 @@ mod tests {
     use super::*;
     use axum::body::{to_bytes, Body};
     use axum::http::{Method, Request};
-    use dspd_engine::session::NativeSpec;
-    use dspd_engine::{param_channel, ParamReceiver, StageSpec, StripSpec, Width};
+    use dspd_engine::{param_channel, NativeSpec, ParamReceiver, StageSpec, StripSpec, Width};
     use tower::ServiceExt;
 
     fn setup(path: Option<PathBuf>) -> (Shared, ParamReceiver) {

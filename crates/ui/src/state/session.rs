@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use gpui_kit::{App, SharedString, WeakEntity};
 
 use crate::state::MetersState;
@@ -71,7 +69,7 @@ impl Strip {
     pub fn get_level_meters<'a>(&self, cx: &'a App) -> Option<impl Iterator<Item = f32> + 'a> {
         let last_stage = self.chain.last()?;
 
-        if last_stage.r#type != "peak_meter" {
+        if !last_stage.is_native_plugin("peak_meter") {
             return None;
         }
 
@@ -97,7 +95,7 @@ impl Strip {
             chain: strip
                 .chain
                 .into_iter()
-                .map(|stage| Stage::from_serializable(strip_idx, stage.id, stage, meters.clone()))
+                .map(|stage| Stage::from_serializable(strip_idx, stage, meters.clone()))
                 .collect(),
         }
     }
@@ -105,12 +103,9 @@ impl Strip {
 
 #[derive(serde::Deserialize)]
 pub struct SerializableStage {
-    r#type: String,
-
     id: u32,
-
     #[serde(flatten)]
-    settings: BTreeMap<String, serde_json::Value>,
+    spec: dspd_api::StageSpec,
 }
 
 pub struct Stage {
@@ -121,12 +116,17 @@ pub struct Stage {
     strip_idx: usize,
 
     stage_id: u32,
-    pub(crate) r#type: SharedString,
-
-    pub(crate) settings: BTreeMap<String, serde_json::Value>,
+    spec: dspd_api::StageSpec,
 }
 
 impl Stage {
+    pub fn is_native_plugin(&self, plugin_name: &str) -> bool {
+        match &self.spec {
+            dspd_api::StageSpec::Native(native_spec) => native_spec.plugin == plugin_name,
+            _ => false,
+        }
+    }
+
     pub fn get_meters<'a>(
         &self,
         cx: &'a App,
@@ -142,16 +142,14 @@ impl Stage {
 impl Stage {
     pub fn from_serializable(
         strip_idx: usize,
-        stage_id: u32,
         stage: SerializableStage,
         meters: WeakEntity<MetersState>,
     ) -> Self {
         Self {
             meters,
             strip_idx,
-            stage_id,
-            r#type: SharedString::from(stage.r#type),
-            settings: stage.settings,
+            stage_id: stage.id,
+            spec: stage.spec,
         }
     }
 }

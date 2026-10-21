@@ -16,10 +16,12 @@
 
 use std::sync::Arc;
 
+use dspd_api::StageSpec;
+
 use crate::edit::{EditBatch, EditOp, EditSender};
 use crate::{
     DelayLine, MeterBank, MeterInfo, MeterWriter, Processor, Rack, Registry, SessionSpec, Stage,
-    StageFactory, StageSpec, MAX_STAGES,
+    StageFactory, MAX_STAGES,
 };
 
 /// Why an edit was refused. Nothing has changed when you get one.
@@ -516,8 +518,8 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{edit_channel, param_channel, AudioBlock, ClapSpec, Engine, ParamEvent, Processor};
-    use dspd_api::{BoxedProcessor, ParamDef, PluginContext, PluginDescriptor};
+    use crate::{edit_channel, param_channel, AudioBlock, Engine, ParamEvent, Processor};
+    use dspd_api::{BoxedProcessor, ClapSpec, ParamDef, PluginContext, PluginDescriptor};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // ---- small test plugins -------------------------------------------

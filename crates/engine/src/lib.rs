@@ -24,9 +24,9 @@ pub use live::{EditError, Editor, Inserted};
 pub use params::{param_channel, ParamEvent, ParamReceiver, ParamSender};
 pub use rack::{DelayLine, Rack, Strip};
 pub use registry::Registry;
-pub use session::{ClapSpec, SessionSpec, StageSpec, StripSpec, Width};
+pub use session::SessionSpec;
 
 pub use dspd_api::{
-    AudioBlock, BoxedProcessor, MeterBank, MeterInfo, MeterSpec, MeterWriter, ParamDef,
-    PluginContext, PluginDescriptor, Processor,
+    AudioBlock, BoxedProcessor, ClapSpec, MeterBank, MeterInfo, MeterSpec, MeterWriter, NativeSpec,
+    ParamDef, PluginContext, PluginDescriptor, Processor, StageSpec, StripSpec, Width,
 };
