@@ -2,6 +2,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::PluginDescriptor;
+
 /// Number of channels a strip carries.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -80,7 +82,7 @@ impl Serialize for StageSpec {
                     .iter()
                     .map(|(k, v)| {
                         serde_json::Number::from_f64(*v)
-                            .map(|num| (k.clone(), serde_json::Value::Number(num)))
+                            .map(|num| (k.to_string(), serde_json::Value::Number(num)))
                             .ok_or_else(|| {
                                 S::Error::custom(format!("setting `{k}` is not a finite number"))
                             })
@@ -107,13 +109,22 @@ impl<'de> Deserialize<'de> for StageSpec {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let raw = RawStage::deserialize(deserializer)?;
+
         if raw.kind == "clap" {
             let clap = serde_json::from_value(serde_json::Value::Object(raw.rest))
                 .map_err(D::Error::custom)?;
             return Ok(StageSpec::Clap(clap));
         }
+
         let mut settings = BTreeMap::new();
         for (k, v) in raw.rest {
+            let k = k.parse::<u32>().map_err(|_| {
+                D::Error::custom(format!(
+                    "setting `{k}` of `{}` must be a non-negative integer",
+                    raw.kind
+                ))
+            })?;
+
             let n = v.as_f64().ok_or_else(|| {
                 D::Error::custom(format!(
                     "setting `{k}` of `{}` must be a number, got {v}",
@@ -131,11 +142,11 @@ impl<'de> Deserialize<'de> for StageSpec {
 
 /// A native plugin and its stored parameter values, keyed by `ParamDef::key`.
 /// Parameters that are absent keep the plugin's default.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NativeSpec {
     /// The plugin's `PluginDescriptor::id`.
     pub plugin: String,
-    pub settings: BTreeMap<String, f64>,
+    pub settings: BTreeMap<u32, f64>,
 }
 
 impl NativeSpec {
@@ -146,9 +157,19 @@ impl NativeSpec {
         }
     }
 
+    /// Builder-style helper: `NativeSpec::new("gain").with(GAIN_PARAM_DB, -3.0)`.
+    pub fn with(mut self, id: u32, value: f64) -> Self {
+        self.settings.insert(id, value);
+        self
+    }
+
     /// Builder-style helper: `NativeSpec::new("gain").with("gain_db", -3.0)`.
-    pub fn with(mut self, key: &str, value: f64) -> Self {
-        self.settings.insert(key.to_string(), value);
+    pub fn with_key(mut self, key: &str, value: f64, descriptor: &PluginDescriptor) -> Self {
+        let Some(param) = descriptor.param_by_key(key) else {
+            return self;
+        };
+
+        self.settings.insert(param.id, value);
         self
     }
 }

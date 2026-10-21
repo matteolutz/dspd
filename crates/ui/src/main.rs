@@ -25,8 +25,11 @@ impl HelloWorld {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let stats = UiState::stats(cx);
 
-        let strips = (0..UiState::strips(cx).count())
-            .map(|idx| cx.new(|cx| ChannelStrip::new(idx, cx)))
+        // kinda dumb to collect and then map, but this is the easiest way to get a Vec of entities
+        let strips = UiState::strips(cx)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|strip| cx.new(|cx| ChannelStrip::new(&strip, cx)))
             .collect();
 
         let _subs = vec![

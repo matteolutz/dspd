@@ -1,4 +1,4 @@
-use dspd_api::{AudioBlock, MeterSpec, MeterWriter, ParamDef, PluginDescriptor, Processor};
+use dspd_api::{AudioBlock, MeterSpec, MeterWriter, PluginDescriptor, Processor};
 
 /// Pass-through stage that reports the peak level of its input in dBFS.
 ///
@@ -14,14 +14,15 @@ pub struct PeakMeter {
     writer: Option<MeterWriter>,
 }
 
-/// Descriptor the host registers: `{"type": "peak_meter"}`. It has no settable parameters.
-pub static DESCRIPTOR: PluginDescriptor = PluginDescriptor {
-    id: "peak_meter",
-    name: "Peak Meter",
-    description: "Pass-through that publishes the peak level in dBFS",
-    params: &[] as &[ParamDef],
-    create: |ctx| Box::new(PeakMeter::new(ctx.sample_rate, ctx.channels)),
-};
+pub fn descriptor() -> PluginDescriptor {
+    PluginDescriptor {
+        id: "peak_meter",
+        name: "Peak Meter".to_string(),
+        description: "Pass-through that publishes the peak level in dBFS".to_string(),
+        params: vec![],
+        create: Box::new(|ctx| Box::new(PeakMeter::new(ctx.sample_rate, ctx.channels))),
+    }
+}
 
 const FLOOR: f32 = 1e-6; // -120 dBFS
 const FALL_DB_PER_SEC: f32 = 20.0;

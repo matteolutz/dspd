@@ -169,7 +169,6 @@ impl SessionSpec {
     /// Returns false if the strip, stage or parameter does not exist.
     pub fn apply_param(
         &mut self,
-        registry: &Registry,
         strip: usize,
         stage_idx: usize,
         param_id: u32,
@@ -181,14 +180,7 @@ impl SessionSpec {
             .and_then(|s| s.chain.get_mut(stage_idx))
         {
             Some(StageSpec::Native(n)) => {
-                let Some(def) = registry
-                    .get(&n.plugin)
-                    .and_then(|d| d.param_by_id(param_id))
-                else {
-                    return false;
-                };
-
-                n.settings.insert(def.key.to_string(), value);
+                n.settings.insert(param_id, value);
                 true
             }
             Some(StageSpec::Clap(c)) => {
@@ -218,11 +210,11 @@ impl SessionSpec {
                     )
                 })?;
 
-                for key in n.settings.keys() {
-                    if desc.param_by_key(key).is_none() {
+                for &id in n.settings.keys() {
+                    if desc.param_by_id(id).is_none() {
                         let keys: Vec<_> = desc.params.iter().map(|p| p.key).collect();
                         return Err(format!(
-                            "{at}: plugin `{}` has no setting `{key}` (it has: {})",
+                            "{at}: plugin `{}` has no setting with id {id} (it has: {})",
                             n.plugin,
                             if keys.is_empty() {
                                 "none".to_string()
@@ -261,8 +253,8 @@ impl SessionSpec {
 
                 let mut processor = (desc.create)(&ctx);
 
-                for (key, value) in &n.settings {
-                    let def = desc.param_by_key(key).expect("checked by check_plugins");
+                for (&id, value) in &n.settings {
+                    let def = desc.param_by_id(id).expect("checked by check_plugins");
                     processor.set_param(def.id, *value);
                 }
 
@@ -311,8 +303,8 @@ impl SessionSpec {
 
                         let mut processor = (desc.create)(&ctx);
 
-                        for (key, value) in &n.settings {
-                            let def = desc.param_by_key(key).expect("checked by check_plugins");
+                        for (&id, value) in &n.settings {
+                            let def = desc.param_by_id(id).expect("checked by check_plugins");
                             processor.set_param(def.id, *value);
                         }
 
@@ -358,9 +350,9 @@ mod tests {
     use dspd_plugin_gain::GAIN_PARAM_DB;
 
     fn registry() -> Registry {
-        Registry::from_descriptors(&[
-            &dspd_plugin_gain::DESCRIPTOR,
-            &dspd_plugin_peak_meter::DESCRIPTOR,
+        Registry::from_descriptors([
+            dspd_plugin_gain::descriptor(),
+            dspd_plugin_peak_meter::descriptor(),
         ])
         .unwrap()
     }
@@ -439,7 +431,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            !spec.apply_param(&registry(), 0, 0, 0, 1.0),
+            !spec.apply_param(0, 0, 0, 1.0),
             "a meter has nothing to set"
         );
         let rack = spec.build_rack(&registry(), &NoClap).unwrap();
@@ -464,14 +456,13 @@ mod tests {
     #[test]
     fn apply_param_updates_spec() {
         let mut spec = SessionSpec::from_json_str(two_strip_json()).unwrap();
-        let reg = registry();
-        assert!(spec.apply_param(&reg, 0, 0, GAIN_PARAM_DB, -9.0));
-        assert!(spec.apply_param(&reg, 0, 1, 3, 0.5));
-        assert!(!spec.apply_param(&reg, 0, 0, 99, 1.0)); // gain has only param 0
-        assert!(!spec.apply_param(&reg, 5, 0, 0, 1.0)); // no such strip
-        assert!(!spec.apply_param(&reg, 1, 0, 0, 1.0)); // strip 1 has no stages
+        assert!(spec.apply_param(0, 0, GAIN_PARAM_DB, -9.0));
+        assert!(spec.apply_param(0, 1, 3, 0.5));
+        assert!(!spec.apply_param(0, 0, 99, 1.0)); // gain has only param 0
+        assert!(!spec.apply_param(5, 0, 0, 1.0)); // no such strip
+        assert!(!spec.apply_param(1, 0, 0, 1.0)); // strip 1 has no stages
         match &spec.strips[0].chain[0] {
-            StageSpec::Native(n) => assert_eq!(n.settings["gain_db"], -9.0),
+            StageSpec::Native(n) => assert_eq!(n.settings[&GAIN_PARAM_DB], -9.0),
             _ => unreachable!(),
         }
     }
@@ -501,7 +492,7 @@ mod tests {
         let again = SessionSpec::from_json_str(&spec.to_json_pretty().unwrap()).unwrap();
         match &again.strips[0].chain[0] {
             StageSpec::Native(n) => {
-                assert_eq!(*n, NativeSpec::new("gain").with("gain_db", -6.0206))
+                assert_eq!(*n, NativeSpec::new("gain").with(GAIN_PARAM_DB, -6.0206))
             }
             other => panic!("unexpected {other:?}"),
         }

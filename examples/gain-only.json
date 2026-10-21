@@ -9,7 +9,9 @@
       "chain": [
         {
           "type": "gain",
-          "gain_db": -6.0
+          "params": {
+            "0": -6.0
+          }
         }
       ]
     }

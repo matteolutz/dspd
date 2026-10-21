@@ -1,5 +1,5 @@
 use async_tungstenite::{smol::connect_async, tungstenite::Message};
-use dspd_api::MeterInfo;
+use dspd_api::{MeterInfo, StageSpec};
 use futures_util::StreamExt;
 use gpui_kit::{private::serde, Context, EventEmitter, Task};
 
@@ -21,10 +21,30 @@ pub enum WebSocketMessage {
     },
 
     ParamChanged {
-        strip: u32,
+        strip: usize,
         stage_id: u32,
         param_id: u32,
         value: f64,
+    },
+
+    StageInserted {
+        strip: usize,
+        stage_id: u32,
+        position: usize,
+        stage: StageSpec,
+    },
+    StageRemoved {
+        strip: usize,
+        stage_id: u32,
+    },
+    StageMoved {
+        strip: usize,
+        stage_id: u32,
+        new_position: usize,
+    },
+    StageOrder {
+        strip: usize,
+        order: Vec<u32>,
     },
 }
 
@@ -44,10 +64,30 @@ pub enum WebSocketEvent {
     },
 
     UpdateParam {
-        strip: u32,
+        strip: usize,
         stage_id: u32,
         param_id: u32,
         value: f64,
+    },
+
+    StageInserted {
+        strip: usize,
+        stage_id: u32,
+        position: usize,
+        stage: StageSpec,
+    },
+    StageRemoved {
+        strip: usize,
+        stage_id: u32,
+    },
+    StageMoved {
+        strip: usize,
+        stage_id: u32,
+        new_position: usize,
+    },
+    StageOrder {
+        strip: usize,
+        order: Vec<u32>,
     },
 }
 
@@ -116,6 +156,44 @@ impl WebSocket {
                                             param_id,
                                             value,
                                         })
+                                    });
+                                }
+                                WebSocketMessage::StageInserted {
+                                    strip,
+                                    stage_id,
+                                    position,
+                                    stage,
+                                } => {
+                                    _ = this.update(cx, |_, cx| {
+                                        cx.emit(WebSocketEvent::StageInserted {
+                                            strip,
+                                            stage_id,
+                                            position,
+                                            stage,
+                                        })
+                                    });
+                                }
+                                WebSocketMessage::StageRemoved { strip, stage_id } => {
+                                    _ = this.update(cx, |_, cx| {
+                                        cx.emit(WebSocketEvent::StageRemoved { strip, stage_id })
+                                    });
+                                }
+                                WebSocketMessage::StageMoved {
+                                    strip,
+                                    stage_id,
+                                    new_position,
+                                } => {
+                                    _ = this.update(cx, |_, cx| {
+                                        cx.emit(WebSocketEvent::StageMoved {
+                                            strip,
+                                            stage_id,
+                                            new_position,
+                                        })
+                                    });
+                                }
+                                WebSocketMessage::StageOrder { strip, order } => {
+                                    _ = this.update(cx, |_, cx| {
+                                        cx.emit(WebSocketEvent::StageOrder { strip, order })
                                     });
                                 }
                             }

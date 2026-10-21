@@ -39,40 +39,50 @@ impl UiState {
         cx.global::<Self>().session.clone()
     }
 
-    pub fn strips<'a>(cx: &'a App) -> impl Iterator<Item = &'a Strip> {
-        cx.global::<Self>().session.read(cx).strips.iter()
+    pub fn strips<'a>(cx: &'a App) -> impl Iterator<Item = Entity<Strip>> + 'a {
+        cx.global::<Self>().session.read(cx).strips.iter().cloned()
     }
 
-    pub fn strip_at<'a>(idx: usize, cx: &'a App) -> Option<&'a Strip> {
-        cx.global::<Self>().session.read(cx).strips.get(idx)
+    pub fn strip_at<'a>(idx: usize, cx: &'a App) -> Option<Entity<Strip>> {
+        cx.global::<Self>()
+            .session
+            .read(cx)
+            .strips
+            .get(idx)
+            .cloned()
     }
 }
 
 impl Global for UiState {}
 
 impl UiState {
-    fn get_session(server_url: &reqwest::Url, meters: WeakEntity<MetersState>) -> Session {
+    fn get_session(
+        server_url: &reqwest::Url,
+        meters: WeakEntity<MetersState>,
+        cx: &mut App,
+    ) -> Session {
         let body = reqwest::blocking::get(server_url.join("/session").expect("Failed to join URL"))
             .and_then(|res| res.text())
             .expect("Failed to get session");
         let session: SerializableSession =
             serde_json::from_str(&body).expect("Failed to deserialize session");
 
-        Session::from_serializable(session, meters)
+        Session::from_serializable(session, meters, cx)
     }
 
     pub fn init(server_url: impl reqwest::IntoUrl, cx: &mut App) {
         let server_url = server_url.into_url().expect("Failed to parse server URL");
 
         let meters = cx.new(|_| MetersState::default());
-        let session = cx.new(|_| Self::get_session(&server_url, meters.downgrade()));
+        let session = cx.new(|cx| Self::get_session(&server_url, meters.downgrade(), cx));
 
         let websocket = cx.new(|cx| WebSocket::start(&server_url, cx));
         let websocket_evt_sub = cx.subscribe(&websocket, |_, evt, cx| match evt {
             WebSocketEvent::EngineRestarted => {
                 let new_session = Self::get_session(
-                    &cx.global::<Self>().server_url,
+                    &cx.global::<Self>().server_url.clone(),
                     Self::meters(cx).downgrade(),
+                    cx,
                 );
 
                 Self::session(cx).update(cx, |session, cx| {
@@ -92,12 +102,45 @@ impl UiState {
                     cx.notify();
                 });
             }
-            WebSocketEvent::UpdateParam {
+            &WebSocketEvent::UpdateParam {
                 strip,
                 stage_id,
                 param_id,
                 value,
-            } => {}
+            } => {
+                Self::session(cx).update(cx, |session, cx| {
+                    session.set_param(strip, stage_id, param_id, value, cx);
+                });
+            }
+            WebSocketEvent::StageInserted {
+                strip,
+                stage_id,
+                position,
+                stage,
+            } => {
+                Self::session(cx).update(cx, |session, cx| {
+                    session.insert_stage(*strip, stage.clone(), *stage_id, *position, cx);
+                });
+            }
+            &WebSocketEvent::StageRemoved { strip, stage_id } => {
+                Self::session(cx).update(cx, |session, cx| {
+                    session.remove_stage(strip, stage_id, cx);
+                });
+            }
+            &WebSocketEvent::StageMoved {
+                strip,
+                stage_id,
+                new_position,
+            } => {
+                Self::session(cx).update(cx, |session, cx| {
+                    session.move_stage(strip, stage_id, new_position, cx)
+                });
+            }
+            WebSocketEvent::StageOrder { strip, order } => {
+                Self::session(cx).update(cx, |session, cx| {
+                    session.set_stage_order(*strip, order.clone(), cx);
+                });
+            }
         });
 
         let (stats, stats_task) = EngineStats::start_fetching(&server_url, cx);

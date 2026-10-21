@@ -1,5 +1,5 @@
 use axum::extract::ws::{Message, WebSocket};
-use dspd_engine::MeterInfo;
+use dspd_engine::{MeterInfo, StageSpec};
 use serde::Serialize;
 
 #[derive(Clone, Serialize)]
@@ -20,10 +20,30 @@ pub enum WebSocketEvent {
     },
 
     ParamChanged {
-        strip: u32,
+        strip: usize,
         stage_id: u32,
         param_id: u32,
         value: f64,
+    },
+
+    StageInserted {
+        strip: usize,
+        stage_id: u32,
+        position: usize,
+        stage: StageSpec,
+    },
+    StageRemoved {
+        strip: usize,
+        stage_id: u32,
+    },
+    StageMoved {
+        strip: usize,
+        stage_id: u32,
+        new_position: usize,
+    },
+    StageOrder {
+        strip: usize,
+        order: Vec<u32>,
     },
 }
 

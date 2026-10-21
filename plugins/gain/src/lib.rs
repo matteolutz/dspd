@@ -3,21 +3,23 @@ use dspd_api::{AudioBlock, ParamDef, PluginDescriptor, Processor};
 /// Parameter id of the gain control (in dB).
 pub const GAIN_PARAM_DB: u32 = 0;
 
-/// Descriptor the host registers: `{"type": "gain", "gain_db": -3.0}`.
-pub static DESCRIPTOR: PluginDescriptor = PluginDescriptor {
-    id: "gain",
-    name: "Gain",
-    description: "Simple gain stage",
-    params: &[ParamDef {
-        id: GAIN_PARAM_DB,
-        key: "gain_db",
-        name: "Gain (dB)",
-        min: -120.0,
-        max: 24.0,
-        default: 0.0,
-    }],
-    create: |_ctx| Box::new(Gain::new(0.0)),
-};
+pub fn descriptor() -> PluginDescriptor {
+    PluginDescriptor {
+        id: "gain",
+        name: "Gain".to_string(),
+        description: "Simple gain stage".to_string(),
+        params: [ParamDef {
+            id: GAIN_PARAM_DB,
+            key: "gain_db",
+            name: "Gain (dB)".to_string(),
+            min: -120.0,
+            max: 24.0,
+            default: 0.0,
+        }]
+        .to_vec(),
+        create: Box::new(|_ctx| Box::new(Gain::new(0.0))),
+    }
+}
 
 /// Gain stage. Gain changes are ramped linearly across one block to avoid zipper noise.
 pub struct Gain {
@@ -117,11 +119,9 @@ mod tests {
 
     #[test]
     fn descriptor_matches_the_constants() {
-        assert_eq!(
-            DESCRIPTOR.param_by_key("gain_db").unwrap().id,
-            GAIN_PARAM_DB
-        );
-        let p = (DESCRIPTOR.create)(&dspd_api::PluginContext {
+        let desc = descriptor();
+        assert_eq!(desc.param_by_key("gain_db").unwrap().id, GAIN_PARAM_DB);
+        let p = (desc.create)(&dspd_api::PluginContext {
             sample_rate: 48_000,
             max_block: 64,
             channels: 2,

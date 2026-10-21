@@ -12,7 +12,7 @@ const RESERVED_IDS: &[&str] = &["clap"];
 
 #[derive(Default)]
 pub struct Registry {
-    plugins: BTreeMap<&'static str, &'static PluginDescriptor>,
+    plugins: BTreeMap<&'static str, PluginDescriptor>,
 }
 
 impl Registry {
@@ -21,9 +21,11 @@ impl Registry {
     }
 
     /// Build a registry from a list of descriptors.
-    pub fn from_descriptors(descriptors: &[&'static PluginDescriptor]) -> Result<Self, String> {
+    pub fn from_descriptors(
+        descriptors: impl IntoIterator<Item = PluginDescriptor>,
+    ) -> Result<Self, String> {
         let mut r = Self::new();
-        for d in descriptors {
+        for d in descriptors.into_iter() {
             r.register(d)?;
         }
         Ok(r)
@@ -31,14 +33,9 @@ impl Registry {
 
     /// Add a plugin. Fails on a duplicate or reserved id, or on a parameter
     /// list that repeats an id or a key (a clash would make settings ambiguous).
-    pub fn register(&mut self, d: &'static PluginDescriptor) -> Result<(), String> {
-        if d.id.is_empty()
-            || !d
-                .id
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-        {
-            return Err(format!("plugin id `{}` must be lowercase snake_case", d.id));
+    pub fn register(&mut self, d: PluginDescriptor) -> Result<(), String> {
+        if d.id.is_empty() {
+            return Err("plugin id cannot be empty".to_string());
         }
         if RESERVED_IDS.contains(&d.id) {
             return Err(format!("plugin id `{}` is reserved", d.id));
@@ -64,13 +61,13 @@ impl Registry {
         Ok(())
     }
 
-    pub fn get(&self, id: &str) -> Option<&'static PluginDescriptor> {
-        self.plugins.get(id).copied()
+    pub fn get(&self, id: &str) -> Option<&PluginDescriptor> {
+        self.plugins.get(id)
     }
 
     /// All plugins, sorted by id.
-    pub fn iter(&self) -> impl Iterator<Item = &'static PluginDescriptor> + '_ {
-        self.plugins.values().copied()
+    pub fn iter(&self) -> impl Iterator<Item = &PluginDescriptor> {
+        self.plugins.values()
     }
 
     pub fn len(&self) -> usize {
@@ -87,30 +84,23 @@ mod tests {
     use super::*;
     use dspd_api::{ParamDef, Processor};
 
-    fn make(id: &'static str, params: &'static [ParamDef]) -> &'static PluginDescriptor {
-        Box::leak(Box::new(PluginDescriptor {
+    fn make(id: &'static str, params: impl IntoIterator<Item = ParamDef>) -> PluginDescriptor {
+        PluginDescriptor {
             id,
-            name: "x",
-            description: "",
-            params,
-            create: |_| -> Box<dyn Processor + Send> { Box::new(dspd_plugin_gain::Gain::new(0.0)) },
-        }))
+            name: "x".to_string(),
+            description: "".to_string(),
+            params: params.into_iter().collect(),
+            create: Box::new(|_| -> Box<dyn Processor + Send> {
+                Box::new(dspd_plugin_gain::Gain::new(0.0))
+            }),
+        }
     }
-
-    const P: ParamDef = ParamDef {
-        id: 0,
-        key: "a",
-        name: "A",
-        min: 0.0,
-        max: 1.0,
-        default: 0.0,
-    };
 
     #[test]
     fn registers_and_looks_up() {
-        let r = Registry::from_descriptors(&[
-            &dspd_plugin_gain::DESCRIPTOR,
-            &dspd_plugin_peak_meter::DESCRIPTOR,
+        let r = Registry::from_descriptors([
+            dspd_plugin_gain::descriptor(),
+            dspd_plugin_peak_meter::descriptor(),
         ])
         .unwrap();
         assert_eq!(r.len(), 2);
@@ -124,23 +114,41 @@ mod tests {
 
     #[test]
     fn rejects_bad_descriptors() {
+        let p: ParamDef = ParamDef {
+            id: 0,
+            key: "a",
+            name: "A".to_string(),
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+        };
+
         let mut r = Registry::new();
-        r.register(make("ok", &[P])).unwrap();
-        assert!(r.register(make("ok", &[])).unwrap_err().contains("twice"));
+        r.register(make("ok", [p.clone()])).unwrap();
+        assert!(r.register(make("ok", [])).unwrap_err().contains("twice"));
         assert!(r
-            .register(make("clap", &[]))
+            .register(make("clap", []))
             .unwrap_err()
             .contains("reserved"));
         assert!(r
-            .register(make("Bad-Id", &[]))
+            .register(make("Bad-Id", []))
             .unwrap_err()
             .contains("snake_case"));
         assert!(r
-            .register(make("dup_id", &[P, ParamDef { key: "b", ..P }]))
+            .register(make(
+                "dup_id",
+                [
+                    p.clone(),
+                    ParamDef {
+                        key: "b",
+                        ..p.clone()
+                    }
+                ]
+            ))
             .unwrap_err()
             .contains("id 0"));
         assert!(r
-            .register(make("dup_key", &[P, ParamDef { id: 1, ..P }]))
+            .register(make("dup_key", [p.clone(), ParamDef { id: 1, ..p }]))
             .unwrap_err()
             .contains("key `a`"));
     }

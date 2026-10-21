@@ -246,9 +246,8 @@ async fn set_param(
         Some(editor) => editor.index_of(req.strip as usize, req.stage),
         None => Some(req.stage as usize),
     };
-    let applied = position.is_some_and(|p| {
-        candidate.apply_param(&s.registry, req.strip as usize, p, req.param_id, req.value)
-    });
+    let applied = position
+        .is_some_and(|p| candidate.apply_param(req.strip as usize, p, req.param_id, req.value));
     if !applied {
         return Err(error(
             StatusCode::NOT_FOUND,
@@ -274,7 +273,7 @@ async fn set_param(
     *session = candidate;
 
     _ = s.event_tx.send(WebSocketEvent::ParamChanged {
-        strip: req.strip,
+        strip: req.strip as usize,
         stage_id: req.stage,
         param_id: req.param_id,
         value: req.value,
@@ -354,7 +353,7 @@ fn edit_status(e: &EditError) -> StatusCode {
 /// Run an edit on a blocking thread (loading a plugin can take a while) with the
 /// session and editor locked, then publish the new meter list.
 async fn edit<T: Send + 'static>(
-    s: Shared,
+    s: &Shared,
     f: impl FnOnce(&mut Editor, &mut SessionSpec) -> Result<T, EditError> + Send + 'static,
 ) -> Result<T, ApiError> {
     let gate = s.gate.read().await;
@@ -391,10 +390,19 @@ async fn insert_stage(
     Path(strip): Path<usize>,
     Json(req): Json<InsertRequest>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let done = edit(s, move |ed, session| {
-        ed.insert(session, strip, req.index, req.stage)
+    let stage = req.stage.clone();
+    let done = edit(&s, move |ed, session| {
+        ed.insert(session, strip, req.index, stage)
     })
     .await?;
+
+    _ = s.event_tx.send(WebSocketEvent::StageInserted {
+        strip: strip,
+        stage_id: done.id,
+        position: done.index,
+        stage: req.stage,
+    });
+
     Ok((
         StatusCode::CREATED,
         Json(json!({
@@ -410,7 +418,13 @@ async fn remove_stage(
     State(s): State<Shared>,
     Path((strip, id)): Path<(usize, u32)>,
 ) -> Result<Json<Value>, ApiError> {
-    edit(s, move |ed, session| ed.remove(session, strip, id)).await?;
+    edit(&s, move |ed, session| ed.remove(session, strip, id)).await?;
+
+    _ = s.event_tx.send(WebSocketEvent::StageRemoved {
+        strip: strip,
+        stage_id: id,
+    });
+
     Ok(Json(json!({ "removed": id })))
 }
 
@@ -419,10 +433,17 @@ async fn move_stage(
     Path((strip, id)): Path<(usize, u32)>,
     Json(req): Json<MoveRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    edit(s, move |ed, session| {
+    edit(&s, move |ed, session| {
         ed.move_stage(session, strip, id, req.index)
     })
     .await?;
+
+    _ = s.event_tx.send(WebSocketEvent::StageMoved {
+        strip: strip,
+        stage_id: id,
+        new_position: req.index,
+    });
+
     Ok(Json(json!({ "moved": id, "index": req.index })))
 }
 
@@ -432,7 +453,17 @@ async fn set_order(
     Json(req): Json<OrderRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let order = req.order.clone();
-    edit(s, move |ed, session| ed.reorder(session, strip, &req.order)).await?;
+
+    edit(&s, move |ed, session| {
+        ed.reorder(session, strip, &req.order)
+    })
+    .await?;
+
+    _ = s.event_tx.send(WebSocketEvent::StageOrder {
+        strip: strip,
+        order: order.clone(),
+    });
+
     Ok(Json(json!({ "order": order })))
 }
 
@@ -592,6 +623,7 @@ mod tests {
     use axum::body::{to_bytes, Body};
     use axum::http::{Method, Request};
     use dspd_engine::{param_channel, NativeSpec, ParamReceiver, StageSpec, StripSpec, Width};
+    use dspd_plugin_gain::GAIN_PARAM_DB;
     use tower::ServiceExt;
 
     fn setup(path: Option<PathBuf>) -> (Shared, ParamReceiver) {
@@ -601,9 +633,7 @@ mod tests {
             width,
             input,
             output: None,
-            chain: vec![StageSpec::Native(
-                NativeSpec::new("gain").with("gain_db", 0.0),
-            )],
+            chain: vec![StageSpec::Native(NativeSpec::new("gain").with(0, 0.0))],
         };
         // strip 0: mono on channel 0; strip 1: stereo on channels 1-2
         let spec = SessionSpec {
@@ -750,7 +780,7 @@ mod tests {
 
         let saved = SessionSpec::load(&path).unwrap();
         match &saved.strips[0].chain[0] {
-            StageSpec::Native(n) => assert_eq!(n.settings["gain_db"], -3.0),
+            StageSpec::Native(n) => assert_eq!(n.settings[&GAIN_PARAM_DB], -3.0),
             other => panic!("unexpected {other:?}"),
         }
     }

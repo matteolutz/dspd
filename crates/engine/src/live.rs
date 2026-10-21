@@ -519,7 +519,7 @@ impl Editor {
 mod tests {
     use super::*;
     use crate::{edit_channel, param_channel, AudioBlock, Engine, ParamEvent, Processor};
-    use dspd_api::{BoxedProcessor, ClapSpec, ParamDef, PluginContext, PluginDescriptor};
+    use dspd_api::{BoxedProcessor, ClapSpec, ParamDef, PluginDescriptor};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // ---- small test plugins -------------------------------------------
@@ -544,20 +544,24 @@ mod tests {
             }
         }
     }
-    static ADD: PluginDescriptor = PluginDescriptor {
-        id: "add",
-        name: "Add",
-        description: "adds a constant",
-        params: &[ParamDef {
-            id: 0,
-            key: "c",
-            name: "c",
-            min: -10.0,
-            max: 10.0,
-            default: 0.0,
-        }],
-        create: |_| Box::new(Add(0.0)),
-    };
+
+    fn add_descriptor() -> PluginDescriptor {
+        PluginDescriptor {
+            id: "add",
+            name: "Add".to_string(),
+            description: "adds a constant".to_string(),
+            params: [ParamDef {
+                id: 0,
+                key: "c",
+                name: "c".to_string(),
+                min: -10.0,
+                max: 10.0,
+                default: 0.0,
+            }]
+            .to_vec(),
+            create: Box::new(|_| Box::new(Add(0.0))),
+        }
+    }
 
     /// Delays by `frames` and reports it as latency.
     struct Delay {
@@ -595,26 +599,30 @@ mod tests {
             }
         }
     }
-    static DELAY: PluginDescriptor = PluginDescriptor {
-        id: "delay",
-        name: "Delay",
-        description: "delays and reports latency",
-        params: &[ParamDef {
-            id: 0,
-            key: "frames",
-            name: "frames",
-            min: 0.0,
-            max: 4800.0,
-            default: 0.0,
-        }],
-        create: |ctx| {
-            Box::new(Delay {
-                frames: 0,
-                ring: vec![vec![0.0; 1]; ctx.channels],
-                pos: 0,
-            })
-        },
-    };
+
+    fn delay_descriptor() -> PluginDescriptor {
+        PluginDescriptor {
+            id: "delay",
+            name: "Delay".to_string(),
+            description: "delays and reports latency".to_string(),
+            params: [ParamDef {
+                id: 0,
+                key: "frames",
+                name: "frames".to_string(),
+                min: 0.0,
+                max: 4800.0,
+                default: 0.0,
+            }]
+            .to_vec(),
+            create: Box::new(|ctx| {
+                Box::new(Delay {
+                    frames: 0,
+                    ring: vec![vec![0.0; 1]; ctx.channels],
+                    pos: 0,
+                })
+            }),
+        }
+    }
 
     /// Counts how many instances were dropped.
     static DROPS: AtomicUsize = AtomicUsize::new(0);
@@ -632,13 +640,15 @@ mod tests {
             DROPS.fetch_add(1, Ordering::SeqCst);
         }
     }
-    static TRACKED: PluginDescriptor = PluginDescriptor {
-        id: "tracked",
-        name: "Tracked",
-        description: "counts drops",
-        params: &[],
-        create: |_: &PluginContext| Box::new(Tracked),
-    };
+    fn tracked_descriptor() -> PluginDescriptor {
+        PluginDescriptor {
+            id: "tracked",
+            name: "Tracked".to_string(),
+            description: "counts drops".to_string(),
+            params: vec![],
+            create: Box::new(|_| Box::new(Tracked)),
+        }
+    }
 
     struct NoClap;
     impl StageFactory for NoClap {
@@ -649,12 +659,12 @@ mod tests {
 
     fn registry() -> Arc<Registry> {
         Arc::new(
-            Registry::from_descriptors(&[
-                &dspd_plugin_gain::DESCRIPTOR,
-                &dspd_plugin_peak_meter::DESCRIPTOR,
-                &ADD,
-                &DELAY,
-                &TRACKED,
+            Registry::from_descriptors([
+                dspd_plugin_gain::descriptor(),
+                dspd_plugin_peak_meter::descriptor(),
+                add_descriptor(),
+                delay_descriptor(),
+                tracked_descriptor(),
             ])
             .unwrap(),
         )

@@ -148,6 +148,10 @@ struct ServeArgs {
     #[arg(long)]
     cpal_host: Option<String>,
 
+    /// Path to look for CLAP plugins. If absent, no CLAP plugins are loaded.
+    #[arg(long)]
+    clap_path: Option<PathBuf>,
+
     #[arg(short, long, default_value_t = 128)]
     block: usize,
     /// Test signal for the null backend.
@@ -590,7 +594,7 @@ fn list_native_plugins() -> Result<()> {
         if d.params.is_empty() {
             println!("  (no settable parameters)");
         }
-        for p in d.params {
+        for p in &d.params {
             println!(
                 "  param {:>3}  {:<12} {:<16} range {} .. {}, default {}",
                 p.id, p.key, p.name, p.min, p.max, p.default
