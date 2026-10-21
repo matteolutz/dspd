@@ -22,14 +22,14 @@ impl ClapIntoPluginDescriptor for dspd_host_clap::PluginInfo {
 
         PluginDescriptor {
             id: id.clone().leak(),
-            name: id.clone(),
+            name: self.name.clone(),
             description: self.description,
             params: self
                 .params
                 .into_iter()
                 .map(|p| ParamDef {
                     id: p.id,
-                    key: p.name.clone().leak(),
+                    key: p.id.to_string().leak(),
                     name: p.name,
                     default: p.default,
                     min: p.min,
@@ -76,23 +76,31 @@ impl ClapIntoPluginDescriptor for dspd_host_clap::PluginInfo {
     }
 }
 
-pub fn registry() -> Registry {
-    // A bad descriptor is a programming error in a plugin crate; the registry
-    // unit tests and the `lists_native_plugins` e2e test catch it before release.
-
+pub fn registry(clap_plugin_path: Option<PathBuf>) -> Registry {
     let mut plugins = vec![
         dspd_plugin_gain::descriptor(),
         dspd_plugin_peak_meter::descriptor(),
         dspd_plugin_dyn_eq::descriptor(),
     ];
 
-    let test_clap_file: PathBuf =
-        "C:/Users/Matteo/Downloads/duskverb-windows/CLAP/DuskVerb.clap".into();
-    let clap_plugins = inspect(&test_clap_file)
-        .unwrap()
-        .into_iter()
-        .map(|info| info.leak_plugin_descriptor(&test_clap_file));
-    plugins.extend(clap_plugins);
+    if let Some(clap_plugin_path) = clap_plugin_path {
+        let clap_plugin_paths = glob::glob(&clap_plugin_path.join("*.clap").to_string_lossy())
+            .expect(&format!(
+                "Failed global CLAP plugin dir `{}`",
+                clap_plugin_path.display()
+            ))
+            .filter_map(|f| f.ok());
+
+        let clap_plugin_infos =
+            clap_plugin_paths.filter_map(|p| inspect(&p).ok().map(|plugins| (p, plugins)));
+        let plugin_descriptors = clap_plugin_infos.flat_map(|(path, plugins)| {
+            plugins
+                .into_iter()
+                .map(move |p| p.leak_plugin_descriptor(&path))
+        });
+
+        plugins.extend(plugin_descriptors);
+    }
 
     Registry::from_descriptors(plugins).expect("native plugin descriptors are valid")
 }

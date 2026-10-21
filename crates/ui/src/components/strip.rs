@@ -1,7 +1,7 @@
 use gpui_kit::{
+    base::StyledExt,
     component::{
-        black,
-        button::{Button, ButtonVariants},
+        button::{Button, ButtonRounded, ButtonVariants},
         ActiveTheme,
     },
     div,
@@ -33,7 +33,8 @@ impl ChannelStrip {
             .w_full()
             .border_b_1()
             .border_color(cx.theme().border)
-            .py_1()
+            .bg(cx.theme().accent)
+            .py_2()
             .px_2()
     }
 }
@@ -80,20 +81,31 @@ impl Render for ChannelStrip {
             .child(
                 Self::strip_section(cx)
                     .flex_1()
-                    .bg(black())
+                    .bg(cx.theme().background)
+                    .border_2()
+                    .border_color(cx.theme().accent)
                     .flex()
                     .flex_col()
-                    .p_1()
+                    .py_2()
+                    .px_1()
                     .gap_1()
                     .children(strip.stages_without_io_meters(cx).map(|stage| {
                         div()
                             .bg(cx.theme().primary)
                             .text_color(cx.theme().primary_foreground)
                             .text_xs()
+                            .font_bold()
                             .w_full()
                             .h_10()
                             .p_2()
-                            .child(stage.read(cx).id_str())
+                            .rounded(cx.theme().radius * 0.5)
+                            .child(
+                                stage
+                                    .read(cx)
+                                    .name(cx)
+                                    .map(|name| name.to_string())
+                                    .unwrap_or_else(|| stage.read(cx).id_str().to_string()),
+                            )
                     }))
                     .child(
                         Button::new("add-stage")
@@ -101,6 +113,7 @@ impl Render for ChannelStrip {
                             .w_full()
                             .h_10()
                             .p_2()
+                            .rounded(ButtonRounded::Small)
                             .child("+"),
                     ),
             ) // plugin list

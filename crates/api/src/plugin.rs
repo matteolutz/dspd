@@ -17,12 +17,12 @@
 use crate::processor::BoxedProcessor;
 
 /// One settable parameter of a native plugin.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ParamDef {
     /// Id passed to `Processor::set_param` and used by `POST /params`.
     pub id: u32,
     /// Key in the session JSON, e.g. `"gain_db"` in `{"type":"gain","gain_db":-3}`.
-    /// Lowercase snake_case, unique inside the plugin.
+    /// unique inside the plugin.
     pub key: &'static str,
     /// Human-readable name for a frontend.
     pub name: String,
@@ -42,6 +42,7 @@ pub struct PluginContext {
 }
 
 /// Everything the host needs to list and instantiate a native plugin.
+#[derive(serde::Serialize)]
 pub struct PluginDescriptor {
     /// Stable identifier, used as `"type"` in session files. Lowercase snake_case.
     pub id: &'static str,
@@ -50,6 +51,7 @@ pub struct PluginDescriptor {
     pub params: Vec<ParamDef>,
     /// Build a processor with every parameter at its default. The host then
     /// applies the values stored in the session through `set_param`.
+    #[serde(skip)]
     pub create: Box<dyn Fn(&PluginContext) -> BoxedProcessor + Send + Sync>,
 }
 

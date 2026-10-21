@@ -1679,6 +1679,7 @@ dependencies = [
  "dspd-plugin-dyn-eq",
  "dspd-plugin-gain",
  "dspd-plugin-peak-meter",
+ "glob",
  "hound",
  "libc",
  "serde_json",

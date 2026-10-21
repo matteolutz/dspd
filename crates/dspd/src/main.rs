@@ -82,6 +82,9 @@ struct RenderArgs {
     /// Keep the chain's latency in the output instead of trimming it.
     #[arg(long)]
     no_latency_compensation: bool,
+    /// Path to look for CLAP plugins. If absent, no CLAP plugins are loaded.
+    #[arg(long)]
+    clap_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -177,7 +180,7 @@ struct ServeArgs {
 #[derive(clap::Args)]
 struct DevicesArgs {
     /// The CPAL host to use (substring match). Defaults to `cpal::default_host()`
-    #[arg(short, long)]
+    #[arg(long)]
     host: Option<String>,
 }
 
@@ -190,6 +193,7 @@ enum DeviceType {
 #[derive(clap::Args)]
 struct DeviceConfigsArgs {
     /// The CPAL host to use (substring match). Defaults to `cpal::default_host()`
+    #[arg(long)]
     host: Option<String>,
 
     /// Input device name (substring match).
@@ -352,7 +356,8 @@ fn render(a: RenderArgs) -> Result<()> {
         );
     }
 
-    let Built { engine, .. } = build_engine(&spec, &Arc::new(plugins::registry()), false)?;
+    let Built { engine, .. } =
+        build_engine(&spec, &Arc::new(plugins::registry(a.clap_path)), false)?;
     let stats = engine.stats();
     let latency = engine.latency_frames();
 
@@ -379,7 +384,7 @@ fn bench(a: BenchArgs) -> Result<()> {
         bail!("--seconds must be positive");
     }
 
-    let Built { engine, .. } = build_engine(&spec, &Arc::new(plugins::registry()), false)?;
+    let Built { engine, .. } = build_engine(&spec, &Arc::new(plugins::registry(None)), false)?;
     let stats = engine.stats();
     let latency = engine.latency_frames();
 
@@ -416,7 +421,7 @@ fn serve(a: ServeArgs) -> Result<()> {
         }
     }
 
-    let registry = Arc::new(plugins::registry());
+    let registry = Arc::new(plugins::registry(a.clap_path));
     let Built {
         engine,
         params,
@@ -527,7 +532,7 @@ fn serve(a: ServeArgs) -> Result<()> {
 }
 
 fn list_native_plugins() -> Result<()> {
-    for d in plugins::registry().iter() {
+    for d in plugins::registry(None).iter() {
         println!("{}  \"{}\"  {}", d.id, d.name, d.description);
         if d.params.is_empty() {
             println!("  (no settable parameters)");

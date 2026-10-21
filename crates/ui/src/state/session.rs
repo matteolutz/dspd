@@ -1,7 +1,7 @@
 use dspd_api::StageSpec;
 use gpui_kit::{App, AppContext, Context, Entity, SharedString, WeakEntity};
 
-use crate::state::MetersState;
+use crate::state::{registry::Registry, MetersState};
 
 #[derive(serde::Deserialize)]
 pub struct SerializableSession {
@@ -22,6 +22,7 @@ impl Session {
     pub fn from_serializable(
         value: SerializableSession,
         meters: WeakEntity<MetersState>,
+        registry: WeakEntity<Registry>,
         cx: &mut App,
     ) -> Self {
         Self {
@@ -32,7 +33,9 @@ impl Session {
                 .into_iter()
                 .enumerate()
                 .map(|(idx, strip)| {
-                    cx.new(|cx| Strip::from_serializable(idx, strip, meters.clone(), cx))
+                    cx.new(|cx| {
+                        Strip::from_serializable(idx, strip, meters.clone(), registry.clone(), cx)
+                    })
                 })
                 .collect(),
         }
@@ -127,6 +130,8 @@ pub struct Strip {
     // ref to the meters state entity, so we can query the meters for this strip
     meters: WeakEntity<MetersState>,
 
+    registry: WeakEntity<Registry>,
+
     /// The strips idx in the strip list
     strip_idx: usize,
 
@@ -194,6 +199,7 @@ impl Strip {
     ) {
         let new_stage = Stage {
             meters: self.meters.clone(),
+            registry: self.registry.clone(),
             spec: stage,
             stage_id,
             strip_idx: self.strip_idx,
@@ -280,10 +286,12 @@ impl Strip {
         strip_idx: usize,
         strip: SerializableStrip,
         meters: WeakEntity<MetersState>,
+        registry: WeakEntity<Registry>,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
             meters: meters.clone(),
+            registry: registry.clone(),
             strip_idx,
             name: SharedString::from(strip.name),
             input: strip.input,
@@ -291,7 +299,15 @@ impl Strip {
                 .chain
                 .into_iter()
                 .map(|stage| {
-                    cx.new(|cx| Stage::from_serializable(strip_idx, stage, meters.clone(), cx))
+                    cx.new(|cx| {
+                        Stage::from_serializable(
+                            strip_idx,
+                            stage,
+                            meters.clone(),
+                            registry.clone(),
+                            cx,
+                        )
+                    })
                 })
                 .collect(),
         }
@@ -309,6 +325,9 @@ pub struct Stage {
     // ref to the meters state entity, so we can query the meters for this stage
     meters: WeakEntity<MetersState>,
 
+    // ref to the registry entity, so we can query the registry for this stage
+    registry: WeakEntity<Registry>,
+
     /// The strip idx in the strip list of a session
     strip_idx: usize,
 
@@ -317,9 +336,25 @@ pub struct Stage {
 }
 
 impl Stage {
-    pub fn id_str(&self) -> String {
+    pub fn id_str(&self) -> &str {
         match &self.spec {
-            dspd_api::StageSpec::Native(native_spec) => native_spec.plugin.clone(),
+            dspd_api::StageSpec::Native(native_spec) => native_spec.plugin.as_str(),
+        }
+    }
+
+    pub fn name<'a>(&'a self, cx: &'a App) -> Option<&'a str> {
+        match &self.spec {
+            dspd_api::StageSpec::Native(native_spec) => {
+                let registry = self
+                    .registry
+                    .upgrade()
+                    .expect("Registry entity has been dropped")
+                    .read(cx);
+
+                registry
+                    .get_plugin(&native_spec.plugin)
+                    .map(|desc| desc.name.as_str())
+            }
         }
     }
 
@@ -356,10 +391,12 @@ impl Stage {
         strip_idx: usize,
         stage: SerializableStage,
         meters: WeakEntity<MetersState>,
+        registry: WeakEntity<Registry>,
         _cx: &mut Context<Self>,
     ) -> Self {
         Self {
             meters,
+            registry,
             strip_idx,
             stage_id: stage.id,
             spec: stage.spec,

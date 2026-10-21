@@ -17,6 +17,16 @@
           "type": "peak_meter"
         }
       ]
+    },
+    {
+      "name": "channel 2",
+      "width": "mono",
+      "input": 2
+    },
+    {
+      "name": "channel 3",
+      "width": "mono",
+      "input": 3
     }
   ]
 }

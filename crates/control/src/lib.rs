@@ -304,16 +304,7 @@ async fn get_plugins(State(s): State<Shared>) -> Json<Value> {
     let plugins: Vec<Value> = s
         .registry
         .iter()
-        .map(|d| {
-            let params: Vec<Value> = d
-                .params
-                .iter()
-                .map(|p| {
-                    json!({ "id": p.id, "key": p.key, "name": p.name, "min": p.min, "max": p.max, "default": p.default })
-                })
-                .collect();
-            json!({ "id": d.id, "name": d.name, "description": d.description, "params": params })
-        })
+        .map(|d| serde_json::to_value(d).unwrap())
         .collect();
     Json(json!({ "plugins": plugins }))
 }

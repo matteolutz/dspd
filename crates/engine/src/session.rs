@@ -205,7 +205,7 @@ impl SessionSpec {
                 let desc = registry.get(&n.plugin).ok_or_else(|| {
                     let known: Vec<_> = registry.iter().map(|d| d.id).collect();
                     format!(
-                        "{at}: unknown plugin type `{}` (native plugins: {}; or use \"clap\")",
+                        "{at}: unknown plugin type `{}` (plugins: {})",
                         n.plugin,
                         known.join(", ")
                     )
