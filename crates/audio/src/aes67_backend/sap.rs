@@ -42,7 +42,7 @@ impl SapAnnouncementMessageType {
 }
 
 #[derive(Debug, Clone)]
-struct SapAnnouncementHeader {
+pub struct SapAnnouncementHeader {
     /// 3-bit version number
     version: u8,
 
@@ -85,7 +85,7 @@ pub struct SapListener {
 impl SapListener {
     pub fn bind(multicast_group: Ipv4Addr, interface: Ipv4Addr, port: u16) -> Aes67Result<Self> {
         let socket = std::net::UdpSocket::bind((interface, port))?;
-        socket.join_multicast_v4(&multicast_group.into(), &interface)?;
+        socket.join_multicast_v4(&multicast_group, &interface)?;
         let socket = tokio::net::UdpSocket::from_std(socket)?;
 
         let (tx, rx) = mpsc::channel(64);
@@ -109,7 +109,7 @@ impl SapListener {
                     }
                 };
 
-                if let Err(_) = tx.send(announcement).await {
+                if tx.send(announcement).await.is_err() {
                     eprintln!("Receiver dropped, stopping SAP listener");
                     break;
                 }

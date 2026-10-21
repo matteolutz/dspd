@@ -1,13 +1,4 @@
-use dspd_api::ClapSpec;
-
 use crate::{AudioBlock, BoxedProcessor, Processor};
-
-/// Builds CLAP stages. Implemented by the host (the binary), which keeps this
-/// crate free of plugin-format code.
-pub trait StageFactory: Send + Sync {
-    /// Load a CLAP stage for a strip that is `width` channels wide (1 or 2).
-    fn load_clap(&self, spec: &ClapSpec, width: usize) -> Result<BoxedProcessor, String>;
-}
 
 /// One processor in a chain, with a human-readable label.
 pub struct Stage {

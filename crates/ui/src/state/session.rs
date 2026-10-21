@@ -236,7 +236,7 @@ impl Strip {
         }
 
         // Append any stages that were not in the order list to the end of the chain
-        new_chain.extend(self.chain.drain(..));
+        new_chain.append(&mut self.chain);
 
         self.chain = new_chain;
         cx.notify();
@@ -319,22 +319,13 @@ pub struct Stage {
 impl Stage {
     pub fn id_str(&self) -> String {
         match &self.spec {
-            dspd_api::StageSpec::Clap(clap_spec) => {
-                format!(
-                    "clap-{}",
-                    clap_spec.path.file_name().unwrap_or_default().display()
-                )
-            }
-            dspd_api::StageSpec::Native(native_spec) => {
-                format!("native-{}", native_spec.plugin)
-            }
+            dspd_api::StageSpec::Native(native_spec) => native_spec.plugin.clone(),
         }
     }
 
     pub fn is_native_plugin(&self, plugin_name: &str) -> bool {
         match &self.spec {
             dspd_api::StageSpec::Native(native_spec) => native_spec.plugin == plugin_name,
-            _ => false,
         }
     }
 
@@ -351,9 +342,6 @@ impl Stage {
 
     pub fn set_param(&mut self, param_id: u32, value: f64, cx: &mut Context<Self>) {
         match &mut self.spec {
-            dspd_api::StageSpec::Clap(clap_spec) => {
-                clap_spec.params.insert(param_id, value);
-            }
             dspd_api::StageSpec::Native(native_spec) => {
                 native_spec.settings.insert(param_id, value);
             }

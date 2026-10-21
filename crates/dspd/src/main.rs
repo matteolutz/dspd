@@ -12,7 +12,7 @@ mod rt;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,10 +21,10 @@ use clap::{Parser, Subcommand, ValueEnum};
 use dspd_audio::{probe_wav, AudioBackend, NullBackend, OfflineBackend, RunReport, Signal};
 use dspd_control::ControlState;
 use dspd_engine::{
-    edit_channel, param_channel, BoxedProcessor, ClapSpec, DualMono, Editor, Engine, ParamSender,
-    Processor, Registry, SessionSpec, Width,
+    edit_channel, param_channel, Editor, Engine, ParamSender, Processor, Registry, SessionSpec,
+    Width,
 };
-use dspd_host_clap::{inspect, ClapProcessor};
+use dspd_host_clap::inspect;
 use tracing_subscriber::EnvFilter;
 
 use crate::rt::{AudioThreadInit, RtConfig};
@@ -228,60 +228,6 @@ fn main() -> Result<()> {
 // shared helpers
 // ---------------------------------------------------------------------------
 
-struct DspdStageFactory {
-    instances: AtomicU64,
-    sample_rate: f64,
-    max_block: usize,
-}
-
-impl DspdStageFactory {
-    pub fn new(spec: &SessionSpec) -> Self {
-        Self {
-            instances: AtomicU64::new(0),
-            sample_rate: f64::from(spec.sample_rate),
-            max_block: spec.max_block,
-        }
-    }
-}
-
-impl dspd_engine::StageFactory for DspdStageFactory {
-    fn load_clap(&self, spec: &ClapSpec, width: usize) -> Result<BoxedProcessor, String> {
-        let load = || -> Result<ClapProcessor, String> {
-            self.instances.fetch_add(1, Ordering::Relaxed);
-
-            ClapProcessor::load(
-                &spec.path,
-                spec.plugin_id.as_deref(),
-                self.sample_rate,
-                self.max_block,
-            )
-            .with_context(|| format!("loading plugin {}", spec.path.display()))
-            .map_err(|err| err.to_string())
-        };
-
-        let first = load()?;
-        if width == 2 && first.main_input_channels() == 1 {
-            let second = load()?;
-            tracing::debug!(
-                "{}: mono plugin on a stereo strip, running two linked instances",
-                first.name()
-            );
-            return Ok(Box::new(DualMono::new(
-                Box::new(first),
-                Box::new(second),
-                self.max_block,
-            )));
-        }
-        if width == 1 && first.main_input_channels() > 1 {
-            tracing::debug!(
-                "{}: stereo plugin on a mono strip, half its DSP is unused",
-                first.name()
-            );
-        }
-        Ok(Box::new(first))
-    }
-}
-
 /// An engine, the way to send it parameter changes, and (if asked for) the handle that edits its chains live.
 struct Built {
     engine: Engine,
@@ -296,20 +242,17 @@ fn build_engine(spec: &SessionSpec, registry: &Arc<Registry>, live: bool) -> Res
         bail!("the session has no strips");
     }
 
-    let stage_factory = Arc::new(DspdStageFactory::new(&spec));
-
-    let rack = spec.build_rack(registry, stage_factory.as_ref())?;
+    let rack = spec.build_rack(registry)?;
     let mono = spec
         .strips
         .iter()
         .filter(|s| s.width == Width::Mono)
         .count();
     tracing::info!(
-        "built {} strips ({} mono, {} stereo), {} plugin instances, {} meters; {} in / {} out channels; rack latency {} frames",
+        "built {} strips ({} mono, {} stereo), {} meters; {} in / {} out channels; rack latency {} frames",
         spec.strips.len(),
         mono,
         spec.strips.len() - mono,
-        stage_factory.instances.load(Ordering::Relaxed),
         rack.meter_infos().len(),
         spec.input_channels(),
         spec.output_channels(),
@@ -322,12 +265,7 @@ fn build_engine(spec: &SessionSpec, registry: &Arc<Registry>, live: bool) -> Res
     let mut edit_rx = None;
     if live {
         let (etx, erx) = edit_channel(16);
-        editor = Some(Editor::new(
-            &rack,
-            Arc::clone(registry),
-            stage_factory.clone(),
-            etx,
-        ));
+        editor = Some(Editor::new(&rack, Arc::clone(registry), etx));
         edit_rx = Some(erx);
     }
 

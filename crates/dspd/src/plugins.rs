@@ -5,20 +5,20 @@
 //! 2. add it to the workspace `members` and `[workspace.dependencies]`,
 //! 3. add it as a dependency of this crate and list its descriptor below.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use dspd_engine::{DualMono, ParamDef, PluginDescriptor, Processor, Registry};
 use dspd_host_clap::{inspect, ClapProcessor};
 
 pub trait ClapIntoPluginDescriptor {
-    fn leak_plugin_descriptor(self, clap_file: &PathBuf) -> PluginDescriptor;
+    fn leak_plugin_descriptor(self, clap_file: &Path) -> PluginDescriptor;
 }
 
 impl ClapIntoPluginDescriptor for dspd_host_clap::PluginInfo {
-    fn leak_plugin_descriptor(self, clap_file: &PathBuf) -> PluginDescriptor {
+    fn leak_plugin_descriptor(self, clap_file: &Path) -> PluginDescriptor {
         let id = self.id;
-        let clap_file = clap_file.clone();
+        let clap_file = clap_file.to_path_buf();
 
         PluginDescriptor {
             id: id.clone().leak(),

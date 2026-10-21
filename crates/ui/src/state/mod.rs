@@ -43,7 +43,7 @@ impl UiState {
         cx.global::<Self>().session.read(cx).strips.iter().cloned()
     }
 
-    pub fn strip_at<'a>(idx: usize, cx: &'a App) -> Option<Entity<Strip>> {
+    pub fn strip_at(idx: usize, cx: &App) -> Option<Entity<Strip>> {
         cx.global::<Self>()
             .session
             .read(cx)
@@ -92,7 +92,7 @@ impl UiState {
             }
             WebSocketEvent::UpdateMeterInfos { meters } => {
                 Self::meters(cx).update(cx, |meter_state, cx| {
-                    meter_state.update_layout(meters.into_iter().cloned());
+                    meter_state.update_layout(meters.iter().cloned());
                     cx.notify();
                 });
             }

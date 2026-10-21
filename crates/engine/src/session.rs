@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use dspd_api::{PluginContext, StageSpec, StripSpec};
 use serde::{Deserialize, Serialize};
 
-use crate::{BoxedProcessor, Chain, Rack, Registry, Stage, StageFactory, Strip};
+use crate::{BoxedProcessor, Chain, Rack, Registry, Stage, Strip};
 
 /// Upper bound on device channels in a session; guards against typos allocating gigabytes.
 pub const MAX_CHANNELS: usize = 1024;
@@ -173,26 +173,27 @@ impl SessionSpec {
         stage_idx: usize,
         param_id: u32,
         value: f64,
+        registry: &Registry,
     ) -> bool {
         match self
             .strips
             .get_mut(strip)
             .and_then(|s| s.chain.get_mut(stage_idx))
         {
-            Some(StageSpec::Native(n)) => {
+            Some(StageSpec::Native(n))
+                if registry
+                    .get(&n.plugin)
+                    .is_some_and(|desc| desc.param_by_id(param_id).is_some()) =>
+            {
                 n.settings.insert(param_id, value);
-                true
-            }
-            Some(StageSpec::Clap(c)) => {
-                c.params.insert(param_id, value);
                 true
             }
             _ => false,
         }
     }
 
-    /// Check that every native stage names a registered plugin and only sets
-    /// parameters it has. (CLAP stages are checked when they load.)
+    /// Check that every stage names a registered plugin and only sets
+    /// parameters it has
     pub fn check_plugins(&self, registry: &Registry) -> Result<(), String> {
         for (si, strip) in self.strips.iter().enumerate() {
             for (ti, stage) in strip.chain.iter().enumerate() {
@@ -212,14 +213,15 @@ impl SessionSpec {
 
                 for &id in n.settings.keys() {
                     if desc.param_by_id(id).is_none() {
-                        let keys: Vec<_> = desc.params.iter().map(|p| p.key).collect();
+                        let ids: Vec<_> = desc.params.iter().map(|p| p.id.to_string()).collect();
+
                         return Err(format!(
                             "{at}: plugin `{}` has no setting with id {id} (it has: {})",
                             n.plugin,
-                            if keys.is_empty() {
+                            if ids.is_empty() {
                                 "none".to_string()
                             } else {
-                                keys.join(", ")
+                                ids.join(", ")
                             }
                         ));
                     }
@@ -238,7 +240,6 @@ impl SessionSpec {
         registry: &Registry,
         strip: usize,
         stage_idx: usize,
-        stage_factory: &dyn StageFactory,
     ) -> Result<BoxedProcessor, BuildError> {
         let width = self.strips[strip].width.channels();
         let processor = match &self.strips[strip].chain[stage_idx] {
@@ -260,16 +261,6 @@ impl SessionSpec {
 
                 processor
             }
-            StageSpec::Clap(c) => {
-                let mut processor = stage_factory
-                    .load_clap(c, width)
-                    .map_err(BuildError::Factory)?;
-
-                for (id, value) in &c.params {
-                    processor.set_param(*id, *value);
-                }
-                processor
-            }
         };
         Ok(processor)
     }
@@ -279,11 +270,7 @@ impl SessionSpec {
     /// `load_clap` also receives the strip's channel count (1 or 2), so the host
     /// can decide how to run a plugin whose own port layout differs.
     /// Stored parameter values are applied to every stage after creation.
-    pub fn build_rack(
-        &self,
-        registry: &Registry,
-        stage_factory: &dyn StageFactory,
-    ) -> Result<Rack, BuildError> {
+    pub fn build_rack(&self, registry: &Registry) -> Result<Rack, BuildError> {
         self.check_plugins(registry).map_err(BuildError::Spec)?;
 
         let mut strips = Vec::with_capacity(self.strips.len());
@@ -306,17 +293,6 @@ impl SessionSpec {
                         for (&id, value) in &n.settings {
                             let def = desc.param_by_id(id).expect("checked by check_plugins");
                             processor.set_param(def.id, *value);
-                        }
-
-                        processor
-                    }
-                    StageSpec::Clap(c) => {
-                        let mut processor = stage_factory
-                            .load_clap(c, width)
-                            .map_err(BuildError::Factory)?;
-
-                        for (id, value) in &c.params {
-                            processor.set_param(*id, *value);
                         }
 
                         processor
@@ -346,7 +322,7 @@ mod tests {
 
     use super::*;
     use crate::Processor;
-    use dspd_api::{ClapSpec, NativeSpec, Width};
+    use dspd_api::NativeSpec;
     use dspd_plugin_gain::GAIN_PARAM_DB;
 
     fn registry() -> Registry {
@@ -357,40 +333,15 @@ mod tests {
         .unwrap()
     }
 
-    struct NoClap;
-    impl StageFactory for NoClap {
-        fn load_clap(&self, _: &ClapSpec, _: usize) -> Result<BoxedProcessor, String> {
-            Err("no clap in tests".into())
-        }
-    }
-
     fn two_strip_json() -> &'static str {
         r#"{
             "strips": [
                 {"name": "vox", "input": 0, "chain": [
-                    {"type": "gain", "gain_db": -3.0},
-                    {"type": "clap", "path": "plug.clap", "params": {"7": 0.25}}
+                    {"type": "gain", "0": -3.0}
                 ]},
                 {"width": "stereo", "input": 1, "output": 4}
             ]
         }"#
-    }
-
-    #[test]
-    fn json_roundtrip_with_defaults() {
-        let spec = SessionSpec::from_json_str(two_strip_json()).unwrap();
-        assert_eq!(spec.sample_rate, 48_000);
-        assert_eq!(spec.max_block, 256);
-        assert_eq!(spec.strips[0].width, Width::Mono);
-        assert_eq!(spec.strips[1].width, Width::Stereo);
-        assert_eq!(spec.strips[1].output_channel(), 4);
-        assert_eq!(spec.strips[0].output_channel(), 0);
-
-        let again = SessionSpec::from_json_str(&spec.to_json_pretty().unwrap()).unwrap();
-        match &again.strips[0].chain[1] {
-            StageSpec::Clap(c) => assert_eq!(c.params.get(&7), Some(&0.25)),
-            other => panic!("unexpected {other:?}"),
-        }
     }
 
     #[test]
@@ -431,10 +382,10 @@ mod tests {
         )
         .unwrap();
         assert!(
-            !spec.apply_param(0, 0, 0, 1.0),
-            "a meter has nothing to set"
+            !spec.apply_param(0, 0, 0, 1.0, &registry()),
+            "a meter has no params"
         );
-        let rack = spec.build_rack(&registry(), &NoClap).unwrap();
+        let rack = spec.build_rack(&registry()).unwrap();
         assert_eq!(rack.meter_infos().len(), 1);
         // round-trips through JSON
         spec.strips[0].name = Some("x".into());
@@ -456,14 +407,12 @@ mod tests {
     #[test]
     fn apply_param_updates_spec() {
         let mut spec = SessionSpec::from_json_str(two_strip_json()).unwrap();
-        assert!(spec.apply_param(0, 0, GAIN_PARAM_DB, -9.0));
-        assert!(spec.apply_param(0, 1, 3, 0.5));
-        assert!(!spec.apply_param(0, 0, 99, 1.0)); // gain has only param 0
-        assert!(!spec.apply_param(5, 0, 0, 1.0)); // no such strip
-        assert!(!spec.apply_param(1, 0, 0, 1.0)); // strip 1 has no stages
+        assert!(spec.apply_param(0, 0, GAIN_PARAM_DB, -9.0, &registry()));
+        assert!(!spec.apply_param(0, 0, 99, 1.0, &registry())); // gain has only param 0
+        assert!(!spec.apply_param(5, 0, 0, 1.0, &registry())); // no such strip
+        assert!(!spec.apply_param(1, 0, 0, 1.0, &registry())); // strip 1 has no stages
         match &spec.strips[0].chain[0] {
             StageSpec::Native(n) => assert_eq!(n.settings[&GAIN_PARAM_DB], -9.0),
-            _ => unreachable!(),
         }
     }
 
@@ -471,12 +420,12 @@ mod tests {
     fn build_rack_creates_all_strips_with_their_widths() {
         let spec = SessionSpec::from_json_str(
             r#"{"strips":[
-                {"input":0,"chain":[{"type":"gain","gain_db":0}]},
+                {"input":0,"chain":[{"type":"gain","0":0}]},
                 {"width":"stereo","input":1,"chain":[]}
             ]}"#,
         )
         .unwrap();
-        let rack = spec.build_rack(&registry(), &NoClap).unwrap();
+        let rack = spec.build_rack(&registry()).unwrap();
         assert_eq!(rack.strips().len(), 2);
         assert_eq!(rack.strips()[0].width(), 1);
         assert_eq!(rack.strips()[1].width(), 2);
@@ -486,7 +435,7 @@ mod tests {
     #[test]
     fn native_stage_roundtrips_and_applies_stored_settings() {
         let spec = SessionSpec::from_json_str(
-            r#"{"strips":[{"input":0,"chain":[{"type":"gain","gain_db":-6.0206}]}]}"#,
+            r#"{"strips":[{"input":0,"chain":[{"type":"gain","0":-6.0206}]}]}"#,
         )
         .unwrap();
         let again = SessionSpec::from_json_str(&spec.to_json_pretty().unwrap()).unwrap();
@@ -494,15 +443,14 @@ mod tests {
             StageSpec::Native(n) => {
                 assert_eq!(*n, NativeSpec::new("gain").with(GAIN_PARAM_DB, -6.0206))
             }
-            other => panic!("unexpected {other:?}"),
         }
         // The serialized form keeps the flat shape.
         let v: serde_json::Value = serde_json::from_str(&spec.to_json_pretty().unwrap()).unwrap();
         assert_eq!(v["strips"][0]["chain"][0]["type"], "gain");
-        assert_eq!(v["strips"][0]["chain"][0]["gain_db"], -6.0206);
+        assert_eq!(v["strips"][0]["chain"][0]["0"], -6.0206);
 
         // The stored value is applied before the first block, without a ramp.
-        let mut rack = spec.build_rack(&registry(), &NoClap).unwrap();
+        let mut rack = spec.build_rack(&registry()).unwrap();
         let mut input = crate::AudioBlock::new(1, 8);
         input.channel_mut(0).fill(1.0);
         let mut output = crate::AudioBlock::new(1, 8);
@@ -519,11 +467,7 @@ mod tests {
         let spec =
             SessionSpec::from_json_str(r#"{"strips":[{"input":0,"chain":[{"type":"reverb"}]}]}"#)
                 .unwrap();
-        let e = spec
-            .build_rack(&registry(), &NoClap)
-            .err()
-            .unwrap()
-            .to_string();
+        let e = spec.build_rack(&registry()).err().unwrap().to_string();
         assert!(
             e.contains("strip 0 stage 0")
                 && e.contains("unknown plugin type `reverb`")
@@ -532,38 +476,17 @@ mod tests {
         );
 
         let spec = SessionSpec::from_json_str(
-            r#"{"strips":[{"input":0,"chain":[{"type":"gain","gane_db":1}]}]}"#,
+            r#"{"strips":[{"input":0,"chain":[{"type":"gain","1":1}]}]}"#,
         )
         .unwrap();
-        let e = spec
-            .build_rack(&registry(), &NoClap)
-            .err()
-            .unwrap()
-            .to_string();
-        assert!(
-            e.contains("no setting `gane_db`") && e.contains("gain_db"),
-            "{e}"
-        );
+        let e = spec.build_rack(&registry()).err().unwrap().to_string();
+        assert!(e.contains("no setting with id 1") && e.contains("0"), "{e}");
 
         let e = SessionSpec::from_json_str(
-            r#"{"strips":[{"input":0,"chain":[{"type":"gain","gain_db":"loud"}]}]}"#,
+            r#"{"strips":[{"input":0,"chain":[{"type":"gain","0":"loud"}]}]}"#,
         )
         .unwrap_err()
         .to_string();
         assert!(e.contains("must be a number"), "{e}");
-    }
-
-    #[test]
-    fn clap_stage_still_parses_with_string_param_keys() {
-        let spec = SessionSpec::from_json_str(
-            r#"{"strips":[{"input":0,"chain":[{"type":"clap","path":"p.clap","plugin_id":"x","params":{"3":0.5}}]}]}"#,
-        )
-        .unwrap();
-        match &spec.strips[0].chain[0] {
-            StageSpec::Clap(c) => {
-                assert_eq!((c.plugin_id.as_deref(), c.params[&3]), (Some("x"), 0.5))
-            }
-            other => panic!("unexpected {other:?}"),
-        }
     }
 }

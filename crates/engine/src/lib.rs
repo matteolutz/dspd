@@ -16,7 +16,7 @@ pub mod session;
 mod ir_loader;
 mod registry;
 
-pub use chain::{Chain, Stage, StageFactory, MAX_STAGES};
+pub use chain::{Chain, Stage, MAX_STAGES};
 pub use dual_mono::DualMono;
 pub use edit::{edit_channel, EditBatch, EditOp, EditReceiver, EditSender, Retired};
 pub use engine::{Engine, EngineStats, StatsSnapshot};

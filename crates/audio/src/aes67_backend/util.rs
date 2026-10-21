@@ -10,7 +10,7 @@ impl<'a> From<&'a [u8]> for BufferReader<'a> {
 
 impl<'a> BufferReader<'a> {
     pub fn read_u8(&mut self) -> Aes67Result<u8> {
-        if self.0.len() < 1 {
+        if self.0.is_empty() {
             return Err(Aes67Error::BufferReaderError(
                 "Buffer underflow".to_string(),
             ));

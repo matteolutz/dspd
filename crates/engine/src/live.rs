@@ -21,7 +21,7 @@ use dspd_api::StageSpec;
 use crate::edit::{EditBatch, EditOp, EditSender};
 use crate::{
     DelayLine, MeterBank, MeterInfo, MeterWriter, Processor, Rack, Registry, SessionSpec, Stage,
-    StageFactory, MAX_STAGES,
+    MAX_STAGES,
 };
 
 /// Why an edit was refused. Nothing has changed when you get one.
@@ -136,7 +136,6 @@ impl StripShadow {
 /// Control-thread handle for editing the rack that an [`crate::Engine`] runs.
 pub struct Editor {
     registry: Arc<Registry>,
-    factory: Arc<dyn StageFactory>,
     tx: EditSender,
     meters: Arc<MeterBank>,
     slots: SlotAllocator,
@@ -148,12 +147,7 @@ pub struct Editor {
 impl Editor {
     /// Model the rack as it is now. Call this before the rack moves into the
     /// engine; `spec` must be the session the rack was built from.
-    pub fn new(
-        rack: &Rack,
-        registry: Arc<Registry>,
-        factory: Arc<dyn StageFactory>,
-        tx: EditSender,
-    ) -> Self {
+    pub fn new(rack: &Rack, registry: Arc<Registry>, tx: EditSender) -> Self {
         let meters = Arc::clone(rack.meters());
         let meter_infos: Vec<MeterInfo> = rack.meter_infos().to_vec();
         let mut slots = SlotAllocator::new(meters.len());
@@ -195,7 +189,6 @@ impl Editor {
 
         Self {
             registry,
-            factory,
             tx,
             meters,
             slots,
@@ -273,7 +266,7 @@ impl Editor {
             .map_err(EditError::Invalid)?;
 
         let mut processor = candidate
-            .build_stage(&self.registry, strip, at, self.factory.as_ref())
+            .build_stage(&self.registry, strip, at)
             .map_err(|e| EditError::Invalid(e.to_string()))?;
 
         let latency = processor.latency_frames();
@@ -519,7 +512,7 @@ impl Editor {
 mod tests {
     use super::*;
     use crate::{edit_channel, param_channel, AudioBlock, Engine, ParamEvent, Processor};
-    use dspd_api::{BoxedProcessor, ClapSpec, ParamDef, PluginDescriptor};
+    use dspd_api::{ParamDef, PluginDescriptor};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // ---- small test plugins -------------------------------------------
@@ -650,13 +643,6 @@ mod tests {
         }
     }
 
-    struct NoClap;
-    impl StageFactory for NoClap {
-        fn load_clap(&self, _: &ClapSpec, _: usize) -> Result<BoxedProcessor, String> {
-            Err("no clap in tests".into())
-        }
-    }
-
     fn registry() -> Arc<Registry> {
         Arc::new(
             Registry::from_descriptors([
@@ -680,9 +666,9 @@ mod tests {
     fn rig_with(json: &str, queue: usize) -> Rig {
         let spec = SessionSpec::from_json_str(json).unwrap();
         let reg = registry();
-        let rack = spec.build_rack(&reg, &NoClap).unwrap();
+        let rack = spec.build_rack(&reg).unwrap();
         let (tx, rx) = edit_channel(queue);
-        let editor = Editor::new(&rack, reg, Arc::new(NoClap), tx);
+        let editor = Editor::new(&rack, reg, tx);
         let (params, prx) = param_channel(64);
         let engine = Engine::new(rack, prx, spec.sample_rate).with_edits(rx);
         Rig {
@@ -725,7 +711,7 @@ mod tests {
                 &mut r.spec,
                 0,
                 None,
-                stage(r#"{"type":"gain","gain_db":-6.0206}"#),
+                stage(r#"{"type":"gain","0":-6.0206}"#),
             )
             .unwrap();
         assert_eq!((ins.id, ins.index, ins.latency_frames), (0, 0, 0));
@@ -743,7 +729,7 @@ mod tests {
                 &mut r.spec,
                 0,
                 Some(0),
-                stage(r#"{"type":"gain","gain_db":-6.0206}"#),
+                stage(r#"{"type":"gain","0":-6.0206}"#),
             )
             .unwrap();
         assert_eq!((ins.id, ins.index), (1, 0));
@@ -754,14 +740,14 @@ mod tests {
     #[test]
     fn params_still_reach_the_right_stage_after_edits() {
         let mut r =
-            rig(r#"{"max_block":64,"strips":[{"input":0,"chain":[{"type":"add","c":0.5}]}]}"#);
+            rig(r#"{"max_block":64,"strips":[{"input":0,"chain":[{"type":"add","0":0.5}]}]}"#);
         // initial stage has id 0 == position
         r.editor
             .insert(
                 &mut r.spec,
                 0,
                 Some(0),
-                stage(r#"{"type":"gain","gain_db":-6.0206}"#),
+                stage(r#"{"type":"gain","0":-6.0206}"#),
             )
             .unwrap(); // id 1, in front
                        // the add stage is now second but still addressed as id 0
@@ -786,7 +772,7 @@ mod tests {
         let mut r = rig(ONE_STRIP);
         let ins = r
             .editor
-            .insert(&mut r.spec, 0, None, stage(r#"{"type":"add","c":0}"#))
+            .insert(&mut r.spec, 0, None, stage(r#"{"type":"add","0":0}"#))
             .unwrap();
         r.params
             .send(ParamEvent {
@@ -802,7 +788,7 @@ mod tests {
     #[test]
     fn reorder_and_move_change_the_signal_path() {
         let mut r = rig(r#"{"max_block":64,"strips":[{"input":0,"chain":[
-            {"type":"gain","gain_db":-6.0206},{"type":"add","c":0.5}]}]}"#);
+            {"type":"gain","0":-6.0206},{"type":"add","0":0.5}]}]}"#);
         assert!((level(&mut r.engine, 1.0) - 1.0).abs() < 1e-3); // 1*0.5 + 0.5
 
         r.editor.move_stage(&mut r.spec, 0, 1, 0).unwrap(); // add first
@@ -883,12 +869,7 @@ mod tests {
 
         let ins = r
             .editor
-            .insert(
-                &mut r.spec,
-                1,
-                None,
-                stage(r#"{"type":"delay","frames":100}"#),
-            )
+            .insert(&mut r.spec, 1, None, stage(r#"{"type":"delay","0":100}"#))
             .unwrap();
         assert_eq!((ins.latency_frames, ins.rack_latency_frames), (100, 100));
         let mut input = AudioBlock::new(2, 64);
@@ -949,7 +930,7 @@ mod tests {
                 infos[0].stage,
                 infos[0].name.as_str()
             ),
-            (1, 0, 0, a.id, "Peak")
+            (1, 0, 0, a.id, "Peak 1")
         );
         level(&mut r.engine, 0.5);
         let bank = r.engine.meters();
@@ -999,28 +980,10 @@ mod tests {
         );
         let e = r
             .editor
-            .insert(
-                &mut r.spec,
-                0,
-                None,
-                stage(r#"{"type":"gain","gane_db":1}"#),
-            )
+            .insert(&mut r.spec, 0, None, stage(r#"{"type":"gain","1":1}"#))
             .unwrap_err();
         assert!(
-            matches!(&e, EditError::Invalid(m) if m.contains("no setting `gane_db`")),
-            "{e}"
-        );
-        let e = r
-            .editor
-            .insert(
-                &mut r.spec,
-                0,
-                None,
-                stage(r#"{"type":"clap","path":"x.clap"}"#),
-            )
-            .unwrap_err();
-        assert!(
-            matches!(&e, EditError::Invalid(m) if m.contains("no clap in tests")),
+            matches!(&e, EditError::Invalid(m) if m.contains("no setting with id 1")),
             "{e}"
         );
         assert_eq!(
@@ -1084,18 +1047,13 @@ mod tests {
     fn the_edited_spec_round_trips_through_json() {
         let mut r = rig(ONE_STRIP);
         r.editor
-            .insert(
-                &mut r.spec,
-                0,
-                None,
-                stage(r#"{"type":"gain","gain_db":-3}"#),
-            )
+            .insert(&mut r.spec, 0, None, stage(r#"{"type":"gain","0":-3}"#))
             .unwrap();
         r.editor
-            .insert(&mut r.spec, 0, Some(0), stage(r#"{"type":"add","c":1}"#))
+            .insert(&mut r.spec, 0, Some(0), stage(r#"{"type":"add","0":1}"#))
             .unwrap();
         let again = SessionSpec::from_json_str(&r.spec.to_json_pretty().unwrap()).unwrap();
-        let rebuilt = again.build_rack(&registry(), &NoClap).unwrap();
+        let rebuilt = again.build_rack(&registry()).unwrap();
         let labels: Vec<_> = rebuilt.strips()[0]
             .chain()
             .stages()

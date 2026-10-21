@@ -89,11 +89,7 @@ impl RtpReceiver {
                     }
                 };
 
-                println!("rtp: Received {} bytes from {}", len, _src);
-
-                // Here you would parse the RTP packet and handle it according to your needs.
-                // For now, we just send a placeholder message to the channel.
-                if let Err(_) = tx.send(()).await {
+                if tx.send(()).await.is_err() {
                     eprintln!("Receiver dropped, stopping RTP listener");
                     break;
                 }

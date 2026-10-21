@@ -246,8 +246,9 @@ async fn set_param(
         Some(editor) => editor.index_of(req.strip as usize, req.stage),
         None => Some(req.stage as usize),
     };
-    let applied = position
-        .is_some_and(|p| candidate.apply_param(req.strip as usize, p, req.param_id, req.value));
+    let applied = position.is_some_and(|p| {
+        candidate.apply_param(req.strip as usize, p, req.param_id, req.value, &s.registry)
+    });
     if !applied {
         return Err(error(
             StatusCode::NOT_FOUND,
@@ -358,7 +359,7 @@ async fn edit<T: Send + 'static>(
 ) -> Result<T, ApiError> {
     let gate = s.gate.read().await;
     s.require_engine()?;
-    let inner = Arc::clone(&s);
+    let inner = Arc::clone(s);
     let out = tokio::task::spawn_blocking(move || {
         let s = inner;
         // Lock order everywhere: session, then editor.
@@ -397,7 +398,7 @@ async fn insert_stage(
     .await?;
 
     _ = s.event_tx.send(WebSocketEvent::StageInserted {
-        strip: strip,
+        strip,
         stage_id: done.id,
         position: done.index,
         stage: req.stage,
@@ -421,7 +422,7 @@ async fn remove_stage(
     edit(&s, move |ed, session| ed.remove(session, strip, id)).await?;
 
     _ = s.event_tx.send(WebSocketEvent::StageRemoved {
-        strip: strip,
+        strip,
         stage_id: id,
     });
 
@@ -439,7 +440,7 @@ async fn move_stage(
     .await?;
 
     _ = s.event_tx.send(WebSocketEvent::StageMoved {
-        strip: strip,
+        strip,
         stage_id: id,
         new_position: req.index,
     });
@@ -460,7 +461,7 @@ async fn set_order(
     .await?;
 
     _ = s.event_tx.send(WebSocketEvent::StageOrder {
-        strip: strip,
+        strip,
         order: order.clone(),
     });
 
@@ -643,7 +644,7 @@ mod tests {
             outputs: None,
             strips: vec![strip(0, Width::Mono), strip(1, Width::Stereo)],
         };
-        let registry = Registry::from_descriptors(&[&dspd_plugin_gain::DESCRIPTOR]).unwrap();
+        let registry = Registry::from_descriptors([dspd_plugin_gain::descriptor()]).unwrap();
 
         (
             Arc::new(ControlState::new(
@@ -714,8 +715,14 @@ mod tests {
 
         // Only the addressed strip changes in the session.
         let (_, session) = call(&state, Method::GET, "/session", None).await;
-        assert_eq!(session["strips"][1]["chain"][0]["gain_db"], -12.5);
-        assert_eq!(session["strips"][0]["chain"][0]["gain_db"], 0.0);
+        assert_eq!(
+            session["strips"][1]["chain"][0][GAIN_PARAM_DB.to_string()],
+            -12.5
+        );
+        assert_eq!(
+            session["strips"][0]["chain"][0][GAIN_PARAM_DB.to_string()],
+            0.0
+        );
     }
 
     #[tokio::test]
@@ -757,7 +764,10 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE
         );
         let (_, session) = call(&state, Method::GET, "/session", None).await;
-        assert_eq!(session["strips"][0]["chain"][0]["gain_db"], -1.0);
+        assert_eq!(
+            session["strips"][0]["chain"][0][GAIN_PARAM_DB.to_string()],
+            -1.0
+        );
     }
 
     #[tokio::test]
@@ -781,7 +791,6 @@ mod tests {
         let saved = SessionSpec::load(&path).unwrap();
         match &saved.strips[0].chain[0] {
             StageSpec::Native(n) => assert_eq!(n.settings[&GAIN_PARAM_DB], -3.0),
-            other => panic!("unexpected {other:?}"),
         }
     }
 }

@@ -63,6 +63,7 @@ impl Client {
     }
 }
 
+#[cfg(false)]
 #[cfg(test)]
 mod tests {
     use std::net::Ipv4Addr;

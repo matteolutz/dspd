@@ -14,15 +14,15 @@ pub enum LevelMeterValue {
 }
 
 impl LevelMeterValue {
-    fn to_linear(&self) -> f32 {
-        match *self {
+    fn to_linear(self) -> f32 {
+        match self {
             Self::Linear(linear) => linear,
             Self::Decibels(db) => db_to_linear(db as f64),
         }
     }
 
-    fn to_decibels(&self) -> f64 {
-        match *self {
+    fn to_decibels(self) -> f64 {
+        match self {
             Self::Linear(linear) => linear_to_db(linear),
             Self::Decibels(db) => db as f64,
         }

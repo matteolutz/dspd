@@ -64,12 +64,10 @@ struct RawStage {
 ///
 /// ```json
 /// {"type": "gain", "gain_db": -3.0}
-/// {"type": "clap", "path": "comp.clap", "params": {"7": 0.25}}
 /// ```
 #[derive(Clone, Debug)]
 pub enum StageSpec {
     Native(NativeSpec),
-    Clap(ClapSpec),
 }
 
 impl Serialize for StageSpec {
@@ -93,13 +91,6 @@ impl Serialize for StageSpec {
                     rest,
                 }
             }
-            StageSpec::Clap(c) => match serde_json::to_value(c).map_err(S::Error::custom)? {
-                serde_json::Value::Object(rest) => RawStage {
-                    kind: "clap".into(),
-                    rest,
-                },
-                _ => return Err(S::Error::custom("clap spec is not an object")),
-            },
         };
         raw.serialize(serializer)
     }
@@ -110,17 +101,11 @@ impl<'de> Deserialize<'de> for StageSpec {
         use serde::de::Error;
         let raw = RawStage::deserialize(deserializer)?;
 
-        if raw.kind == "clap" {
-            let clap = serde_json::from_value(serde_json::Value::Object(raw.rest))
-                .map_err(D::Error::custom)?;
-            return Ok(StageSpec::Clap(clap));
-        }
-
         let mut settings = BTreeMap::new();
         for (k, v) in raw.rest {
             let k = k.parse::<u32>().map_err(|_| {
                 D::Error::custom(format!(
-                    "setting `{k}` of `{}` must be a non-negative integer",
+                    "setting key `{k}` of `{}` must be a non-negative integer (please use the parameter's id, not its key)",
                     raw.kind
                 ))
             })?;
@@ -211,10 +196,6 @@ impl StageSpec {
     pub fn label(&self) -> String {
         match self {
             StageSpec::Native(n) => n.plugin.clone(),
-            StageSpec::Clap(c) => c
-                .plugin_id
-                .clone()
-                .unwrap_or_else(|| c.path.display().to_string()),
         }
     }
 }

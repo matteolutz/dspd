@@ -489,7 +489,7 @@ mod tests {
                 infos[0].stage,
                 infos[0].name.as_str()
             ),
-            (0, 0, 1, "Peak")
+            (0, 0, 1, "Peak 1")
         );
         assert_eq!((infos[1].slot, infos[1].strip, infos[1].stage), (1, 2, 1));
 

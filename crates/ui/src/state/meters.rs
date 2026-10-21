@@ -50,11 +50,11 @@ impl MetersState {
         self.meters = meters.into_iter().map(|m| m.into()).collect();
     }
 
-    pub(crate) fn meters_for_stage<'a>(
-        &'a self,
+    pub(crate) fn meters_for_stage(
+        &self,
         strip_idx: usize,
         stage_id: u32,
-    ) -> impl Iterator<Item = (u32, &'a String, Option<f32>)> {
+    ) -> impl Iterator<Item = (u32, &String, Option<f32>)> {
         self.meters.iter().filter_map(move |m| {
             if m.strip == strip_idx && m.stage == stage_id {
                 Some((m.param_id, &m.name, m.value))

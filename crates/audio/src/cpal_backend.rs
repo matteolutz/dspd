@@ -63,9 +63,7 @@ pub fn list_hosts() -> Vec<&'static str> {
 
 /// Names of the available (input, output) devices on the default host.
 pub fn list_devices(host_name: Option<&str>) -> Result<(Vec<String>, Vec<String>)> {
-    let host = host_name
-        .map(find_host)
-        .unwrap_or_else(|| cpal::default_host());
+    let host = host_name.map(find_host).unwrap_or_else(cpal::default_host);
 
     let names = |devices: Result<Vec<Device>, _>| -> Vec<String> {
         devices
@@ -107,9 +105,7 @@ pub fn list_device_configs(
     name: &str,
     input: bool,
 ) -> Result<Vec<String>> {
-    let host = host_name
-        .map(find_host)
-        .unwrap_or_else(|| cpal::default_host());
+    let host = host_name.map(find_host).unwrap_or_else(cpal::default_host);
 
     let Some(device) = find_device(&host, Some(name), input)? else {
         return Ok(vec![]);
@@ -180,7 +176,7 @@ impl AudioBackend for CpalBackend {
             .host_name
             .as_deref()
             .map(find_host)
-            .unwrap_or_else(|| cpal::default_host());
+            .unwrap_or_else(cpal::default_host);
 
         let out_dev = find_device(&host, self.output_device.as_deref(), false)?
             .context("no output device available")?;

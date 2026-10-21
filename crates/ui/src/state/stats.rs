@@ -29,9 +29,7 @@ impl EngineStats {
 
                 let body: reqwest::Result<String> = cx
                     .background_spawn(async move {
-                        let body = reqwest::blocking::get(stats_url).and_then(|res| res.text());
-
-                        body
+                        reqwest::blocking::get(stats_url).and_then(|res| res.text())
                     })
                     .await;
 

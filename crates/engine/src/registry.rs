@@ -7,9 +7,6 @@ use std::collections::BTreeMap;
 
 use dspd_api::PluginDescriptor;
 
-/// Reserved: `{"type": "clap"}` loads a CLAP file, so no native plugin may use it.
-const RESERVED_IDS: &[&str] = &["clap"];
-
 #[derive(Default)]
 pub struct Registry {
     plugins: BTreeMap<&'static str, PluginDescriptor>,
@@ -36,9 +33,6 @@ impl Registry {
     pub fn register(&mut self, d: PluginDescriptor) -> Result<(), String> {
         if d.id.is_empty() {
             return Err("plugin id cannot be empty".to_string());
-        }
-        if RESERVED_IDS.contains(&d.id) {
-            return Err(format!("plugin id `{}` is reserved", d.id));
         }
         if self.plugins.contains_key(d.id) {
             return Err(format!("plugin `{}` is registered twice", d.id));
@@ -126,14 +120,6 @@ mod tests {
         let mut r = Registry::new();
         r.register(make("ok", [p.clone()])).unwrap();
         assert!(r.register(make("ok", [])).unwrap_err().contains("twice"));
-        assert!(r
-            .register(make("clap", []))
-            .unwrap_err()
-            .contains("reserved"));
-        assert!(r
-            .register(make("Bad-Id", []))
-            .unwrap_err()
-            .contains("snake_case"));
         assert!(r
             .register(make(
                 "dup_id",
