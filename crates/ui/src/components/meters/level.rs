@@ -1,11 +1,8 @@
 use std::ops::Deref;
 
 use gpui_kit::{
-    bounds, canvas,
-    component::{green_500, red_500, yellow_500, ActiveTheme},
-    div, fill, linear_gradient, point,
-    prelude::FluentBuilder,
-    px, size, Bounds, DefiniteLength, Hsla, IntoElement, ParentElement, RenderOnce, Styled,
+    bounds, canvas, component::ActiveTheme, div, fill, point, prelude::FluentBuilder, px, size,
+    AbsoluteLength, DefiniteLength, Hsla, IntoElement, ParentElement, RenderOnce, Styled,
 };
 
 use crate::components::meters::{db_to_linear, linear_to_db, render_db_value};
@@ -17,15 +14,15 @@ pub enum LevelMeterValue {
 }
 
 impl LevelMeterValue {
-    fn to_linear(&self) -> f32 {
-        match *self {
+    fn to_linear(self) -> f32 {
+        match self {
             Self::Linear(linear) => linear,
             Self::Decibels(db) => db_to_linear(db as f64),
         }
     }
 
-    fn to_decibels(&self) -> f64 {
-        match *self {
+    fn to_decibels(self) -> f64 {
+        match self {
             Self::Linear(linear) => linear_to_db(linear),
             Self::Decibels(db) => db as f64,
         }
@@ -132,6 +129,7 @@ pub struct LevelMeter {
 
     /// The amount of labels (defaults to 0, so no labels)
     n_labels: usize,
+    label_text_size: Option<AbsoluteLength>,
 }
 
 impl LevelMeter {
@@ -141,6 +139,7 @@ impl LevelMeter {
             mode: LevelMeterMode::default(),
 
             n_labels: 0,
+            label_text_size: None,
         }
     }
 
@@ -151,6 +150,11 @@ impl LevelMeter {
 
     pub fn with_labels(mut self, n_labels: usize) -> Self {
         self.n_labels = n_labels;
+        self
+    }
+
+    pub fn with_label_font_size(mut self, font_size: impl Into<AbsoluteLength>) -> Self {
+        self.label_text_size = Some(font_size.into());
         self
     }
 }
@@ -178,6 +182,7 @@ impl RenderOnce for LevelMeter {
 
                         div()
                             .text_xs()
+                            .when_some(self.label_text_size, |this, size| this.text_size(size))
                             .text_right()
                             .absolute()
                             .right_0()

@@ -146,7 +146,7 @@ mod tests {
             16,
         );
         let names: Vec<_> = dm.meter_specs().into_iter().map(|s| s.name).collect();
-        assert_eq!(names, vec!["Peak L", "Peak R"]);
+        assert_eq!(names, vec!["Peak 1 L", "Peak 1 R"]);
 
         let bank = MeterBank::new(2);
         dm.attach_meters(MeterWriter::new(bank.clone(), 0, 2));

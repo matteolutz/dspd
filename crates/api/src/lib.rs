@@ -8,8 +8,10 @@ mod block;
 mod meters;
 mod plugin;
 mod processor;
+mod spec;
 
 pub use block::AudioBlock;
 pub use meters::{MeterBank, MeterInfo, MeterWriter, OptionalMeterWriter};
 pub use plugin::{ParamDef, PluginContext, PluginDescriptor};
 pub use processor::{BoxedProcessor, MeterSpec, Processor};
+pub use spec::{ClapSpec, NativeSpec, StageSpec, StripSpec, Width};

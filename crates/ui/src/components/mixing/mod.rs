@@ -54,7 +54,7 @@ impl<T: 'static> MixingComponentValue<T> {
             } => {
                 if let Some(last_change) = last_change {
                     if last_change.elapsed() < *debounce_time {
-                        return &own_value;
+                        return own_value;
                     }
                 }
 

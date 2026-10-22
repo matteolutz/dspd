@@ -6,7 +6,7 @@ mod band;
 mod state;
 
 mod descriptor;
-pub use descriptor::{BAND_COUNT, DESCRIPTOR, PARAMS_PER_BAND};
+pub use descriptor::{descriptor, BAND_COUNT, PARAMS_PER_BAND};
 
 pub struct DynamicEq {
     bands: [DynamicBand; BAND_COUNT],

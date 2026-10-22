@@ -2,3 +2,5 @@
 Cargo.lock.bak
 *.wav
 !tests/**/*.wav
+
+clap_plugins/

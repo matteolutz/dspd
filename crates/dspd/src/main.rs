@@ -21,10 +21,10 @@ use clap::{Parser, Subcommand, ValueEnum};
 use dspd_audio::{probe_wav, AudioBackend, NullBackend, OfflineBackend, RunReport, Signal};
 use dspd_control::ControlState;
 use dspd_engine::{
-    param_channel, BoxedProcessor, ClapSpec, DualMono, Engine, ParamSender, Processor, Registry,
-    SessionSpec, Width,
+    edit_channel, param_channel, Editor, Engine, ParamSender, Processor, Registry, SessionSpec,
+    Width,
 };
-use dspd_host_clap::{inspect, ClapProcessor};
+use dspd_host_clap::inspect;
 use tracing_subscriber::EnvFilter;
 
 use crate::rt::{AudioThreadInit, RtConfig};
@@ -82,6 +82,9 @@ struct RenderArgs {
     /// Keep the chain's latency in the output instead of trimming it.
     #[arg(long)]
     no_latency_compensation: bool,
+    /// Path to look for CLAP plugins. If absent, no CLAP plugins are loaded.
+    #[arg(long)]
+    clap_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -148,6 +151,10 @@ struct ServeArgs {
     #[arg(long)]
     cpal_host: Option<String>,
 
+    /// Path to look for CLAP plugins. If absent, no CLAP plugins are loaded.
+    #[arg(long)]
+    clap_path: Option<PathBuf>,
+
     #[arg(short, long, default_value_t = 128)]
     block: usize,
     /// Test signal for the null backend.
@@ -173,7 +180,7 @@ struct ServeArgs {
 #[derive(clap::Args)]
 struct DevicesArgs {
     /// The CPAL host to use (substring match). Defaults to `cpal::default_host()`
-    #[arg(short, long)]
+    #[arg(long)]
     host: Option<String>,
 }
 
@@ -186,6 +193,7 @@ enum DeviceType {
 #[derive(clap::Args)]
 struct DeviceConfigsArgs {
     /// The CPAL host to use (substring match). Defaults to `cpal::default_host()`
+    #[arg(long)]
     host: Option<String>,
 
     /// Input device name (substring match).
@@ -224,76 +232,57 @@ fn main() -> Result<()> {
 // shared helpers
 // ---------------------------------------------------------------------------
 
-/// Load one CLAP stage for a strip of `width` channels (1 = mono, 2 = stereo).
-///
-/// * Plugin layout matches the strip: used directly.
-/// * Mono plugin on a stereo strip: two instances, one per side, with linked
-///   parameters (`DualMono`).
-/// * Stereo plugin on a mono strip: the mono signal feeds both inputs and the
-///   left output is kept. That works, but half the plugin's DSP is wasted.
-fn load_clap_stage(
-    c: &ClapSpec,
-    width: usize,
-    sample_rate: f64,
-    max_block: usize,
-    instances: &mut usize,
-) -> Result<BoxedProcessor> {
-    let mut load = || -> Result<ClapProcessor> {
-        *instances += 1;
-        ClapProcessor::load(&c.path, c.plugin_id.as_deref(), sample_rate, max_block)
-            .with_context(|| format!("loading plugin {}", c.path.display()))
-    };
-    let first = load()?;
-    if width == 2 && first.main_input_channels() == 1 {
-        let second = load()?;
-        tracing::debug!(
-            "{}: mono plugin on a stereo strip, running two linked instances",
-            first.name()
-        );
-        return Ok(Box::new(DualMono::new(
-            Box::new(first),
-            Box::new(second),
-            max_block,
-        )));
-    }
-    if width == 1 && first.main_input_channels() > 1 {
-        tracing::debug!(
-            "{}: stereo plugin on a mono strip, half its DSP is unused",
-            first.name()
-        );
-    }
-    Ok(Box::new(first))
+/// An engine, the way to send it parameter changes, and (if asked for) the handle that edits its chains live.
+struct Built {
+    engine: Engine,
+    params: ParamSender,
+    editor: Option<Editor>,
 }
 
 /// Instantiate every strip of the session (loading CLAP plugins) and wrap the rack in an engine.
-fn build_engine(spec: &SessionSpec, registry: &Registry) -> Result<(Engine, ParamSender)> {
+/// With `live`, the engine also accepts structural edits through the returned [`Editor`].
+fn build_engine(spec: &SessionSpec, registry: &Arc<Registry>, live: bool) -> Result<Built> {
     if spec.strips.is_empty() {
         bail!("the session has no strips");
     }
-    let sample_rate = f64::from(spec.sample_rate);
-    let max_block = spec.max_block;
-    let mut instances = 0;
-    let rack = spec.build_rack(registry, |c: &ClapSpec, width| {
-        load_clap_stage(c, width, sample_rate, max_block, &mut instances)
-    })?;
+
+    let rack = spec.build_rack(registry)?;
     let mono = spec
         .strips
         .iter()
         .filter(|s| s.width == Width::Mono)
         .count();
     tracing::info!(
-        "built {} strips ({} mono, {} stereo), {} plugin instances, {} meters; {} in / {} out channels; rack latency {} frames",
+        "built {} strips ({} mono, {} stereo), {} meters; {} in / {} out channels; rack latency {} frames",
         spec.strips.len(),
         mono,
         spec.strips.len() - mono,
-        instances,
         rack.meter_infos().len(),
         spec.input_channels(),
         spec.output_channels(),
         rack.latency_frames(),
     );
+
     let (tx, rx) = param_channel(1024);
-    Ok((Engine::new(rack, rx, spec.sample_rate), tx))
+
+    let mut editor = None;
+    let mut edit_rx = None;
+    if live {
+        let (etx, erx) = edit_channel(16);
+        editor = Some(Editor::new(&rack, Arc::clone(registry), etx));
+        edit_rx = Some(erx);
+    }
+
+    let mut engine = Engine::new(rack, rx, spec.sample_rate);
+    if let Some(edit_rx) = edit_rx {
+        engine = engine.with_edits(edit_rx);
+    }
+
+    Ok(Built {
+        engine,
+        params: tx,
+        editor,
+    })
 }
 
 fn check_block(block: usize, spec: &SessionSpec) -> Result<()> {
@@ -367,7 +356,8 @@ fn render(a: RenderArgs) -> Result<()> {
         );
     }
 
-    let (engine, _params) = build_engine(&spec, &plugins::registry())?;
+    let Built { engine, .. } =
+        build_engine(&spec, &Arc::new(plugins::registry(a.clap_path)), false)?;
     let stats = engine.stats();
     let latency = engine.latency_frames();
 
@@ -394,7 +384,7 @@ fn bench(a: BenchArgs) -> Result<()> {
         bail!("--seconds must be positive");
     }
 
-    let (engine, _params) = build_engine(&spec, &plugins::registry())?;
+    let Built { engine, .. } = build_engine(&spec, &Arc::new(plugins::registry(None)), false)?;
     let stats = engine.stats();
     let latency = engine.latency_frames();
 
@@ -431,10 +421,16 @@ fn serve(a: ServeArgs) -> Result<()> {
         }
     }
 
-    let registry = Arc::new(plugins::registry());
-    let (engine, params) = build_engine(&spec, &registry)?;
+    let registry = Arc::new(plugins::registry(a.clap_path));
+    let Built {
+        engine,
+        params,
+        editor,
+    } = build_engine(&spec, &registry, true)?;
+
     let stats = engine.stats();
     let latency = engine.latency_frames();
+
     let state = Arc::new(
         ControlState::new(
             params,
@@ -443,7 +439,8 @@ fn serve(a: ServeArgs) -> Result<()> {
             Arc::clone(&stats),
             Some(a.session.clone()),
         )
-        .with_meters(engine.meters(), engine.meter_infos()),
+        .with_meters(engine.meters(), engine.meter_infos())
+        .with_editor(editor.expect("editor should be present. we passed `true`")),
     );
 
     // The control API lives on a small tokio runtime; the audio side blocks this thread.
@@ -535,12 +532,12 @@ fn serve(a: ServeArgs) -> Result<()> {
 }
 
 fn list_native_plugins() -> Result<()> {
-    for d in plugins::registry().iter() {
+    for d in plugins::registry(None).iter() {
         println!("{}  \"{}\"  {}", d.id, d.name, d.description);
         if d.params.is_empty() {
             println!("  (no settable parameters)");
         }
-        for p in d.params {
+        for p in &d.params {
             println!(
                 "  param {:>3}  {:<12} {:<16} range {} .. {}, default {}",
                 p.id, p.key, p.name, p.min, p.max, p.default

@@ -8,8 +8,14 @@
       "input": 0,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -6.0
+          "0": -6.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     }

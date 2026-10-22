@@ -30,35 +30,61 @@
 //! The API has no authentication. `dspd serve` binds to 127.0.0.1 by default;
 //! put it behind something that does authenticate before exposing it.
 
+mod ws;
+
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use anyhow::Result;
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{Query, State, WebSocketUpgrade};
+use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use dspd_engine::{
-    EngineStats, MeterBank, MeterInfo, ParamEvent, ParamSender, Registry, SessionSpec,
-    StatsSnapshot,
+    EditError, Editor, EngineStats, MeterBank, MeterInfo, ParamEvent, ParamSender, Registry,
+    SessionSpec, StageSpec, StatsSnapshot,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
+
+use crate::ws::{WebSocketEvent, WebSocketExt};
+
+/// Everything that belongs to one running engine. A restart hands out a new set.
+pub struct EngineHandles {
+    pub params: ParamSender,
+    pub editor: Option<Editor>,
+    pub stats: Arc<EngineStats>,
+    pub meters: Arc<MeterBank>,
+    pub meter_infos: Arc<[MeterInfo]>,
+}
 
 /// Everything the HTTP handlers need.
 pub struct ControlState {
     params: Mutex<ParamSender>,
     session: Mutex<SessionSpec>,
     registry: Arc<Registry>,
-    stats: Arc<EngineStats>,
-    sample_rate: u32,
+    stats: Mutex<Arc<EngineStats>>,
     session_path: Option<PathBuf>,
-    meters: Arc<MeterBank>,
-    meter_infos: Arc<[MeterInfo]>,
+    meters: Mutex<Arc<MeterBank>>,
+    /// The meters that exist right now; replaced when edits add or remove some.
+    meter_infos: Mutex<Arc<[MeterInfo]>>,
+    /// Bumped whenever `meter_infos` is replaced, so WebSocket clients know to re-read it.
+    meter_version: AtomicU64,
+    editor: Mutex<Option<Editor>>,
+    /// Counts engine restarts (backend changes). Stage ids start over after one.
+    generation: AtomicU64,
+    /// False if a restart failed and could not be undone: there is no engine to talk to.
+    engine_up: AtomicBool,
+    /// Requests that talk to the engine hold this for reading; a restart holds it for
+    /// writing, so nothing reaches a half-replaced engine.
+    gate: tokio::sync::RwLock<()>,
+
+    event_tx: tokio::sync::broadcast::Sender<WebSocketEvent>,
 }
 
 impl ControlState {
@@ -70,22 +96,71 @@ impl ControlState {
         session_path: Option<PathBuf>,
     ) -> Self {
         Self {
-            sample_rate: session.sample_rate,
             params: Mutex::new(params),
             session: Mutex::new(session),
             registry,
-            stats,
+            stats: Mutex::new(stats),
             session_path,
-            meters: MeterBank::new(0),
-            meter_infos: Arc::from(Vec::new()),
+            meters: Mutex::new(MeterBank::new(0)),
+            meter_infos: Mutex::new(Arc::from(Vec::new())),
+            meter_version: AtomicU64::new(0),
+            editor: Mutex::new(None),
+            generation: AtomicU64::new(0),
+            engine_up: AtomicBool::new(true),
+            gate: tokio::sync::RwLock::new(()),
+            event_tx: tokio::sync::broadcast::channel(16).0,
         }
     }
 
     /// Serve the engine's live meters (`Engine::meters()` and `Engine::meter_infos()`).
     pub fn with_meters(mut self, meters: Arc<MeterBank>, infos: Arc<[MeterInfo]>) -> Self {
-        self.meters = meters;
-        self.meter_infos = infos;
+        self.meters = Mutex::new(meters);
+        self.meter_infos = Mutex::new(infos);
         self
+    }
+
+    /// Allow inserting, removing and reordering plugins while running.
+    /// Build the editor from the rack before it moves into the engine.
+    pub fn with_editor(mut self, editor: Editor) -> Self {
+        self.editor = Mutex::new(Some(editor));
+        self
+    }
+
+    fn meter_infos(&self) -> Arc<[MeterInfo]> {
+        Arc::clone(&lock(&self.meter_infos))
+    }
+
+    fn meters(&self) -> Arc<MeterBank> {
+        Arc::clone(&lock(&self.meters))
+    }
+
+    fn publish_meter_infos(&self, infos: Arc<[MeterInfo]>) {
+        *lock(&self.meter_infos) = infos;
+        self.meter_version.fetch_add(1, Ordering::Release);
+    }
+
+    /// Switch to a freshly started engine.
+    fn install(&self, h: EngineHandles) {
+        *lock(&self.params) = h.params;
+        *lock(&self.editor) = h.editor;
+        *lock(&self.stats) = h.stats;
+        *lock(&self.meters) = h.meters;
+        self.engine_up.store(true, Ordering::Release);
+        // Before the layout, so a client that sees the new layout also sees the new generation.
+        self.generation.fetch_add(1, Ordering::Release);
+        self.publish_meter_infos(h.meter_infos);
+    }
+
+    /// 503 while there is no engine (a failed restart that could not be undone).
+    fn require_engine(&self) -> Result<(), ApiError> {
+        if self.engine_up.load(Ordering::Acquire) {
+            Ok(())
+        } else {
+            Err(error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "the audio engine is not running; fix the settings with PUT /backend",
+            ))
+        }
     }
 }
 
@@ -106,6 +181,7 @@ struct ParamRequest {
     /// Index into the session's `strips` list. Required on purpose: with many
     /// strips, a forgotten field must not silently hit strip 0.
     strip: u32,
+    /// The stage's id (see the module docs): its position until the first edit.
     stage: u32,
     param_id: u32,
     value: f64,
@@ -115,12 +191,38 @@ async fn health() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
 
-async fn get_session(State(s): State<Shared>) -> Json<SessionSpec> {
-    Json(lock(&s.session).clone())
+/// The session as JSON, with each stage's id added as `id`.
+async fn get_session(State(s): State<Shared>) -> Json<Value> {
+    let session = lock(&s.session);
+    let mut value = serde_json::to_value(&*session).unwrap_or(Value::Null);
+    let editor = lock(&s.editor);
+
+    // TODO: this is kinda hacky, maybe introduce a new type for this
+    if let Some(strips) = value.get_mut("strips").and_then(Value::as_array_mut) {
+        for (si, strip) in strips.iter_mut().enumerate() {
+            let ids = editor.as_ref().and_then(|e| e.stage_ids(si));
+            if let Some(chain) = strip.get_mut("chain").and_then(Value::as_array_mut) {
+                for (ti, stage) in chain.iter_mut().enumerate() {
+                    // Without an editor nothing can move, so the id is the position.
+                    let id = ids
+                        .as_ref()
+                        .and_then(|v| v.get(ti).copied())
+                        .unwrap_or(ti as u32);
+                    if let Some(obj) = stage.as_object_mut() {
+                        obj.insert("id".into(), json!(id));
+                    }
+                }
+            }
+        }
+    }
+
+    Json(value)
 }
 
 async fn get_stats(State(s): State<Shared>) -> Json<StatsSnapshot> {
-    Json(s.stats.snapshot(s.sample_rate))
+    let sample_rate = lock(&s.session).sample_rate;
+    let stats = Arc::clone(&lock(&s.stats));
+    Json(stats.snapshot(sample_rate))
 }
 
 async fn set_param(
@@ -133,17 +235,21 @@ async fn set_param(
             "value must be a finite number",
         ));
     }
+    let _gate = s.gate.read().await;
+    s.require_engine()?;
     let mut session = lock(&s.session);
 
     // Validate against a copy so a rejected change leaves the session untouched.
     let mut candidate = session.clone();
-    if !candidate.apply_param(
-        &s.registry,
-        req.strip as usize,
-        req.stage as usize,
-        req.param_id,
-        req.value,
-    ) {
+    // The spec lists stages by position; the request names one by id.
+    let position = match &*lock(&s.editor) {
+        Some(editor) => editor.index_of(req.strip as usize, req.stage),
+        None => Some(req.stage as usize),
+    };
+    let applied = position.is_some_and(|p| {
+        candidate.apply_param(req.strip as usize, p, req.param_id, req.value, &s.registry)
+    });
+    if !applied {
         return Err(error(
             StatusCode::NOT_FOUND,
             format!(
@@ -166,6 +272,14 @@ async fn set_param(
         ));
     }
     *session = candidate;
+
+    _ = s.event_tx.send(WebSocketEvent::ParamChanged {
+        strip: req.strip as usize,
+        stage_id: req.stage,
+        param_id: req.param_id,
+        value: req.value,
+    });
+
     Ok((StatusCode::ACCEPTED, Json(json!({ "status": "queued" }))))
 }
 
@@ -190,18 +304,175 @@ async fn get_plugins(State(s): State<Shared>) -> Json<Value> {
     let plugins: Vec<Value> = s
         .registry
         .iter()
-        .map(|d| {
-            let params: Vec<Value> = d
-                .params
-                .iter()
-                .map(|p| {
-                    json!({ "id": p.id, "key": p.key, "name": p.name, "min": p.min, "max": p.max, "default": p.default })
-                })
-                .collect();
-            json!({ "id": d.id, "name": d.name, "description": d.description, "params": params })
-        })
+        .map(|d| serde_json::to_value(d).unwrap())
         .collect();
     Json(json!({ "plugins": plugins }))
+}
+
+// ---------------------------------------------------------------------------
+// live editing
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct InsertRequest {
+    /// Position in the chain; the end if absent.
+    index: Option<usize>,
+    stage: StageSpec,
+}
+
+#[derive(Deserialize)]
+struct MoveRequest {
+    index: usize,
+}
+
+#[derive(Deserialize)]
+struct OrderRequest {
+    order: Vec<u32>,
+}
+
+fn edit_status(e: &EditError) -> StatusCode {
+    match e {
+        EditError::NoStrip(_) | EditError::NoStage { .. } => StatusCode::NOT_FOUND,
+        EditError::BadIndex { .. }
+        | EditError::BadOrder(_)
+        | EditError::Invalid(_)
+        | EditError::TooManyStages => StatusCode::BAD_REQUEST,
+        EditError::NoMeterSlots => StatusCode::INSUFFICIENT_STORAGE,
+        EditError::QueueFull => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+/// Run an edit on a blocking thread (loading a plugin can take a while) with the
+/// session and editor locked, then publish the new meter list.
+async fn edit<T: Send + 'static>(
+    s: &Shared,
+    f: impl FnOnce(&mut Editor, &mut SessionSpec) -> Result<T, EditError> + Send + 'static,
+) -> Result<T, ApiError> {
+    let gate = s.gate.read().await;
+    s.require_engine()?;
+    let inner = Arc::clone(s);
+    let out = tokio::task::spawn_blocking(move || {
+        let s = inner;
+        // Lock order everywhere: session, then editor.
+        let mut session = lock(&s.session);
+        let mut guard = lock(&s.editor);
+        let Some(editor) = guard.as_mut() else {
+            return Err(error(
+                StatusCode::NOT_IMPLEMENTED,
+                "this server was started without live editing",
+            ));
+        };
+        let out = f(editor, &mut session).map_err(|e| error(edit_status(&e), e.to_string()))?;
+        s.publish_meter_infos(editor.meter_infos());
+        Ok(out)
+    })
+    .await
+    .unwrap_or_else(|_| {
+        Err(error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "the edit task failed",
+        ))
+    });
+    drop(gate);
+    out
+}
+
+async fn insert_stage(
+    State(s): State<Shared>,
+    Path(strip): Path<usize>,
+    Json(req): Json<InsertRequest>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let stage = req.stage.clone();
+    let done = edit(&s, move |ed, session| {
+        ed.insert(session, strip, req.index, stage)
+    })
+    .await?;
+
+    _ = s.event_tx.send(WebSocketEvent::StageInserted {
+        strip,
+        stage_id: done.id,
+        position: done.index,
+        stage: req.stage,
+    });
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "id": done.id,
+            "index": done.index,
+            "latency_frames": done.latency_frames,
+            "rack_latency_frames": done.rack_latency_frames,
+        })),
+    ))
+}
+
+async fn remove_stage(
+    State(s): State<Shared>,
+    Path((strip, id)): Path<(usize, u32)>,
+) -> Result<Json<Value>, ApiError> {
+    edit(&s, move |ed, session| ed.remove(session, strip, id)).await?;
+
+    _ = s.event_tx.send(WebSocketEvent::StageRemoved {
+        strip,
+        stage_id: id,
+    });
+
+    Ok(Json(json!({ "removed": id })))
+}
+
+async fn move_stage(
+    State(s): State<Shared>,
+    Path((strip, id)): Path<(usize, u32)>,
+    Json(req): Json<MoveRequest>,
+) -> Result<Json<Value>, ApiError> {
+    edit(&s, move |ed, session| {
+        ed.move_stage(session, strip, id, req.index)
+    })
+    .await?;
+
+    _ = s.event_tx.send(WebSocketEvent::StageMoved {
+        strip,
+        stage_id: id,
+        new_position: req.index,
+    });
+
+    Ok(Json(json!({ "moved": id, "index": req.index })))
+}
+
+async fn set_order(
+    State(s): State<Shared>,
+    Path(strip): Path<usize>,
+    Json(req): Json<OrderRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let order = req.order.clone();
+
+    edit(&s, move |ed, session| {
+        ed.reorder(session, strip, &req.order)
+    })
+    .await?;
+
+    _ = s.event_tx.send(WebSocketEvent::StageOrder {
+        strip,
+        order: order.clone(),
+    });
+
+    Ok(Json(json!({ "order": order })))
+}
+
+/// Free removed plugins promptly even when no further edits come in.
+async fn reap_loop(s: Shared) {
+    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tick.tick().await;
+        // try_lock: an edit in progress will reap by itself when it sends.
+        if let Ok(mut guard) = s.editor.try_lock() {
+            if let Some(ed) = guard.as_mut() {
+                ed.reap();
+            }
+        }
+    }
 }
 
 /// One meter as `/meters` reports it: its metadata plus the current value.
@@ -213,12 +484,13 @@ struct MeterReading<'a> {
 }
 
 async fn get_meters(State(s): State<Shared>) -> Json<Value> {
-    let readings: Vec<_> = s
-        .meter_infos
+    let infos = s.meter_infos();
+    let bank = s.meters();
+    let readings: Vec<_> = infos
         .iter()
         .map(|info| MeterReading {
             info,
-            value: s.meters.get(info.slot),
+            value: bank.get(info.slot),
         })
         .collect();
     Json(json!({ "meters": readings }))
@@ -232,41 +504,76 @@ struct WsQuery {
     hz: Option<u32>,
 }
 
-#[derive(Serialize)]
-struct MeterFrame<'a> {
-    r#type: &'static str,
-    values: &'a [f32],
-}
-
-async fn ws_meters(
+async fn ws(
     ws: WebSocketUpgrade,
     State(s): State<Shared>,
     Query(q): Query<WsQuery>,
 ) -> impl IntoResponse {
     let hz = q.hz.unwrap_or(DEFAULT_METER_HZ).clamp(1, MAX_METER_HZ);
-    ws.on_upgrade(move |socket| stream_meters(socket, s, hz))
+    ws.on_upgrade(move |socket| ws_stream(socket, s, hz))
 }
 
 /// Push the meter bank to one client at a fixed rate until it disconnects.
 /// Reads are relaxed atomic loads, so any number of clients cost the audio thread nothing.
-async fn stream_meters(mut socket: WebSocket, s: Shared, hz: u32) {
-    let hello = json!({ "type": "hello", "hz": hz, "meters": &*s.meter_infos }).to_string();
-    if socket.send(Message::Text(hello.into())).await.is_err() {
+/// When edits add or remove meters, a `layout` frame carries the new list.
+async fn ws_stream(mut socket: WebSocket, s: Shared, hz: u32) {
+    let mut generation = s.generation.load(Ordering::Acquire);
+    let mut version = s.meter_version.load(Ordering::Acquire);
+    let mut infos = s.meter_infos();
+
+    let mut event_rx = s.event_tx.subscribe();
+
+    if socket
+        .send_dspd_event(WebSocketEvent::MeterLayout {
+            meters: infos.to_vec(),
+            hz: Some(hz),
+        })
+        .await
+        .is_err()
+    {
         return;
     }
 
     let mut tick = tokio::time::interval(Duration::from_millis(1000 / u64::from(hz)));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut values = Vec::with_capacity(s.meters.len());
+    let mut values: Vec<f32> = Vec::new();
+
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                s.meters.snapshot_into(&mut values);
-                let Ok(frame) = serde_json::to_string(&MeterFrame { r#type: "meters", values: &values }) else { break };
-                if socket.send(Message::Text(frame.into())).await.is_err() {
-                    break;
+                let current_generation = s.generation.load(Ordering::Acquire);
+                if current_generation != generation {
+                    generation = current_generation;
+                    _ = socket.send_dspd_event(WebSocketEvent::Restarted { generation }).await;
                 }
+
+                let current = s.meter_version.load(Ordering::Acquire);
+                if current != version {
+                    version = current;
+                    infos = s.meter_infos();
+                    _ = socket
+                        .send_dspd_event(WebSocketEvent::MeterLayout {
+                            meters: infos.to_vec(),
+                            hz: None,
+                        });
+                }
+
+                // values[i] belongs to the meter in slot i; slots past the last used one are not sent.
+                let bank = s.meters();
+                let used = infos.iter().map(|i| i.slot + 1).max().unwrap_or(0).min(bank.len());
+                values.clear();
+                values.extend((0..used).map(|i| bank.get(i)));
+
+                _ = socket.send_dspd_event(WebSocketEvent::Meters { values: values.clone() }).await;
             }
+            event = event_rx.recv() => match event {
+                Ok(evt) => {
+                    _ = socket.send_dspd_event(evt);
+                }
+                Err(_) => {
+                    // Handle channel closed / lagged error if needed
+                }
+            },
             incoming = socket.recv() => match incoming {
                 // Closed, errored, or a close frame: stop. Anything else the client sends is ignored.
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
@@ -286,13 +593,18 @@ pub fn router(state: Shared) -> Router {
         .route("/session/save", post(save_session))
         .route("/plugins", get(get_plugins))
         .route("/meters", get(get_meters))
-        .route("/ws", get(ws_meters))
+        .route("/strips/{strip}/stages", post(insert_stage))
+        .route("/strips/{strip}/stages/{id}", delete(remove_stage))
+        .route("/strips/{strip}/stages/{id}/move", post(move_stage))
+        .route("/strips/{strip}/order", put(set_order))
+        .route("/ws", get(ws))
         .with_state(state)
 }
 
 /// Serve the API on an already-bound listener until the future is dropped.
 pub async fn serve(listener: TcpListener, state: Shared) -> Result<()> {
     tracing::info!("control API listening on http://{}", listener.local_addr()?);
+    tokio::spawn(reap_loop(Arc::clone(&state)));
     axum::serve(listener, router(state)).await?;
     Ok(())
 }
@@ -302,8 +614,8 @@ mod tests {
     use super::*;
     use axum::body::{to_bytes, Body};
     use axum::http::{Method, Request};
-    use dspd_engine::session::NativeSpec;
-    use dspd_engine::{param_channel, ParamReceiver, StageSpec, StripSpec, Width};
+    use dspd_engine::{param_channel, NativeSpec, ParamReceiver, StageSpec, StripSpec, Width};
+    use dspd_plugin_gain::GAIN_PARAM_DB;
     use tower::ServiceExt;
 
     fn setup(path: Option<PathBuf>) -> (Shared, ParamReceiver) {
@@ -313,9 +625,7 @@ mod tests {
             width,
             input,
             output: None,
-            chain: vec![StageSpec::Native(
-                NativeSpec::new("gain").with("gain_db", 0.0),
-            )],
+            chain: vec![StageSpec::Native(NativeSpec::new("gain").with(0, 0.0))],
         };
         // strip 0: mono on channel 0; strip 1: stereo on channels 1-2
         let spec = SessionSpec {
@@ -325,7 +635,7 @@ mod tests {
             outputs: None,
             strips: vec![strip(0, Width::Mono), strip(1, Width::Stereo)],
         };
-        let registry = Registry::from_descriptors(&[&dspd_plugin_gain::DESCRIPTOR]).unwrap();
+        let registry = Registry::from_descriptors([dspd_plugin_gain::descriptor()]).unwrap();
 
         (
             Arc::new(ControlState::new(
@@ -396,8 +706,14 @@ mod tests {
 
         // Only the addressed strip changes in the session.
         let (_, session) = call(&state, Method::GET, "/session", None).await;
-        assert_eq!(session["strips"][1]["chain"][0]["gain_db"], -12.5);
-        assert_eq!(session["strips"][0]["chain"][0]["gain_db"], 0.0);
+        assert_eq!(
+            session["strips"][1]["chain"][0][GAIN_PARAM_DB.to_string()],
+            -12.5
+        );
+        assert_eq!(
+            session["strips"][0]["chain"][0][GAIN_PARAM_DB.to_string()],
+            0.0
+        );
     }
 
     #[tokio::test]
@@ -439,7 +755,10 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE
         );
         let (_, session) = call(&state, Method::GET, "/session", None).await;
-        assert_eq!(session["strips"][0]["chain"][0]["gain_db"], -1.0);
+        assert_eq!(
+            session["strips"][0]["chain"][0][GAIN_PARAM_DB.to_string()],
+            -1.0
+        );
     }
 
     #[tokio::test]
@@ -462,8 +781,7 @@ mod tests {
 
         let saved = SessionSpec::load(&path).unwrap();
         match &saved.strips[0].chain[0] {
-            StageSpec::Native(n) => assert_eq!(n.settings["gain_db"], -3.0),
-            other => panic!("unexpected {other:?}"),
+            StageSpec::Native(n) => assert_eq!(n.settings[&GAIN_PARAM_DB], -3.0),
         }
     }
 }

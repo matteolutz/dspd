@@ -8,13 +8,25 @@
       "input": 0,
       "chain": [
         {
-          "type": "clap",
-          "path": "C:/Users/Matteo/Downloads/duskverb-windows/CLAP/DuskVerb.clap"
+          "type": "peak_meter"
+        },
+        {
+          "type": "com.dusk-audio.duskverb"
         },
         {
           "type": "peak_meter"
         }
       ]
+    },
+    {
+      "name": "channel 2",
+      "width": "mono",
+      "input": 2
+    },
+    {
+      "name": "channel 3",
+      "width": "mono",
+      "input": 3
     }
   ]
 }

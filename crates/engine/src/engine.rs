@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use serde::Serialize;
 
+use crate::edit::EditReceiver;
 use crate::{AudioBlock, ParamReceiver, Processor, Rack};
 
 /// Counters shared between the audio thread and observers (control API, CLI).
@@ -52,6 +53,7 @@ impl EngineStats {
 pub struct Engine {
     rack: Rack,
     params: ParamReceiver,
+    edits: Option<EditReceiver>,
     stats: Arc<EngineStats>,
     sample_rate: u32,
 }
@@ -61,9 +63,16 @@ impl Engine {
         Self {
             rack,
             params,
+            edits: None,
             stats: Arc::new(EngineStats::default()),
             sample_rate,
         }
+    }
+
+    /// Also accept live structural edits (insert/remove/move stages) from the control side.
+    pub fn with_edits(mut self, edits: EditReceiver) -> Self {
+        self.edits = Some(edits);
+        self
     }
 
     pub fn stats(&self) -> Arc<EngineStats> {
@@ -97,9 +106,18 @@ impl Processor for Engine {
     fn process(&mut self, input: &AudioBlock, output: &mut AudioBlock) {
         let start = Instant::now();
 
+        // Structure first: parameter events address stages by id, and an
+        // event sent after an insert must find the stage it was meant for.
+        if let Some(rx) = &mut self.edits {
+            while let Some(mut batch) = rx.pop() {
+                self.rack.apply_edit(&mut batch);
+                rx.retire(batch);
+            }
+        }
+
         while let Some(ev) = self.params.pop() {
             self.rack
-                .set_param(ev.strip as usize, ev.stage as usize, ev.param_id, ev.value);
+                .set_param(ev.strip as usize, ev.stage, ev.param_id, ev.value);
         }
         self.rack.process(input, output);
 

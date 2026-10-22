@@ -6,7 +6,9 @@
 
 mod chain;
 mod dual_mono;
+mod edit;
 mod engine;
+mod live;
 mod params;
 mod rack;
 pub mod session;
@@ -14,15 +16,17 @@ pub mod session;
 mod ir_loader;
 mod registry;
 
-pub use chain::{Chain, Stage};
+pub use chain::{Chain, Stage, MAX_STAGES};
 pub use dual_mono::DualMono;
+pub use edit::{edit_channel, EditBatch, EditOp, EditReceiver, EditSender, Retired};
 pub use engine::{Engine, EngineStats, StatsSnapshot};
+pub use live::{EditError, Editor, Inserted};
 pub use params::{param_channel, ParamEvent, ParamReceiver, ParamSender};
-pub use rack::{Rack, Strip};
+pub use rack::{DelayLine, Rack, Strip};
 pub use registry::Registry;
-pub use session::{ClapSpec, SessionSpec, StageSpec, StripSpec, Width};
+pub use session::SessionSpec;
 
 pub use dspd_api::{
-    AudioBlock, BoxedProcessor, MeterBank, MeterInfo, MeterSpec, MeterWriter, ParamDef,
-    PluginContext, PluginDescriptor, Processor,
+    AudioBlock, BoxedProcessor, ClapSpec, MeterBank, MeterInfo, MeterSpec, MeterWriter, NativeSpec,
+    ParamDef, PluginContext, PluginDescriptor, Processor, StageSpec, StripSpec, Width,
 };

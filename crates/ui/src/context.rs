@@ -1,5 +1,6 @@
 use gpui_kit::{
-    point, px, App, Bounds, Context, Entity, EventEmitter, Pixels, Point, Subscription, Window,
+    point, px, App, AppContext, AsyncApp, Bounds, Context, Entity, EventEmitter, Pixels, Point,
+    Subscription, WeakEntity, Window,
 };
 
 pub trait GpuiContextExtension<T> {
@@ -71,6 +72,26 @@ impl<'a, T: 'static> GpuiContextExtension<T> for Context<'a, T> {
             view.update(cx, |view, cx| f(view, bounds, c, window, cx))
                 .ok();
         }
+    }
+}
+
+pub trait GpuiAsyncAppExtension {
+    fn try_update_entity<T: 'static, R>(
+        &mut self,
+        handle: &WeakEntity<T>,
+        update: impl FnOnce(&mut T, &mut Context<T>) -> R,
+    ) -> Option<R>;
+}
+
+impl GpuiAsyncAppExtension for AsyncApp {
+    fn try_update_entity<T: 'static, R>(
+        &mut self,
+        handle: &WeakEntity<T>,
+        update: impl FnOnce(&mut T, &mut Context<T>) -> R,
+    ) -> Option<R> {
+        handle
+            .upgrade()
+            .map(|handle| self.update_entity(&handle, update))
     }
 }
 

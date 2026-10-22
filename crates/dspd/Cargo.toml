@@ -23,6 +23,7 @@ tokio.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+glob = "0.3.2"
 
 dspd-plugin-gain.workspace = true
 dspd-plugin-peak-meter.workspace = true

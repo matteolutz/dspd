@@ -3,10 +3,9 @@ use gpui_kit::component::ActiveTheme;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
-use crate::components::meters::LevelMeter;
-use crate::components::mixing::Knob;
+use crate::components::ChannelStrip;
 use crate::context::GpuiContextExtension;
-use crate::state::{EngineStats, UIState};
+use crate::state::{EngineStats, UiState};
 
 mod components;
 mod context;
@@ -16,8 +15,7 @@ mod theme;
 struct HelloWorld {
     stats: Entity<EngineStats>,
 
-    knob: Entity<Knob>,
-
+    strips: Vec<Entity<components::ChannelStrip>>,
     selected_tab: usize,
 
     _subs: Vec<Subscription>,
@@ -25,19 +23,23 @@ struct HelloWorld {
 
 impl HelloWorld {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let stats = cx.global::<UIState>().stats();
+        let stats = UiState::stats(cx);
 
-        let some_value = cx.new(|_| 0.0f32);
-        let knob = cx.new(|_| Knob::new("knob", some_value));
+        // kinda dumb to collect and then map, but this is the easiest way to get a Vec of entities
+        let strips = UiState::strips(cx)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|strip| cx.new(|cx| ChannelStrip::new(&strip, cx)))
+            .collect();
 
         let _subs = vec![
-            cx.observe_and_notify(&cx.global::<UIState>().meters()),
+            cx.observe_and_notify(&UiState::meters(cx)),
             cx.observe_and_notify(&stats),
         ];
 
         Self {
             stats,
-            knob,
+            strips,
             selected_tab: 0,
             _subs,
         }
@@ -119,27 +121,7 @@ impl Render for HelloWorld {
                     .w_full()
                     .flex_1()
                     .flex()
-                    .children(cx.global::<UIState>().strips(cx).map(|strip| {
-                        div()
-                            .w_20()
-                            .p_2()
-                            .h_full()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .child(strip.name.clone())
-                            .child(self.knob.clone())
-                            .when_some(strip.get_level_meters(cx), |this, levels| {
-                                this.child(
-                                    div()
-                                        .mt_auto()
-                                        .h_80()
-                                        .child(LevelMeter::new(levels).with_labels(8)),
-                                )
-                            })
-                    })),
+                    .children(self.strips.iter().cloned()),
             )
     }
 }
@@ -149,7 +131,7 @@ fn main() {
         init(cx);
         theme::set_theme(cx);
 
-        UIState::init(cx);
+        UiState::init("http://localhost:8080", cx);
 
         open_window(
             WindowOptions {
