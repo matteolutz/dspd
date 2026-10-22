@@ -6,10 +6,74 @@ use gpui_kit::{
     },
     div,
     prelude::FluentBuilder,
-    rems, App, Context, Entity, ParentElement, Render, Styled, Subscription,
+    rems, rgb, App, Context, Entity, Hsla, InteractiveElement, ParentElement, Render,
+    StatefulInteractiveElement, Styled, Subscription,
 };
 
-use crate::{components::meters::LevelMeter, context::GpuiContextExtension, state::Strip};
+use crate::{
+    components::meters::LevelMeter,
+    context::GpuiContextExtension,
+    state::{Strip, UiState},
+};
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChannelStripColor {
+    CanaryYellow,
+    Goldenrod,
+    Tangerine,
+    SignalRed,
+    Coral,
+    HotPink,
+    Orchid,
+    ElectricViolet,
+    #[default]
+    IndigoBlue,
+    Azure,
+    Cyan,
+    Turquoise,
+    SeaGreen,
+    Emerald,
+    LimeGreen,
+    Olive,
+    SlateBlue,
+    SteelGray,
+    GraphiteGray,
+    WhiteSmoke,
+}
+
+impl ChannelStripColor {
+    pub fn into_hsla(self) -> Hsla {
+        self.into()
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<Hsla> for ChannelStripColor {
+    fn into(self) -> Hsla {
+        match self {
+            Self::CanaryYellow => rgb(0xEAC93D).into(),
+            Self::Goldenrod => rgb(0xDEA42D).into(),
+            Self::Tangerine => rgb(0xE6782B).into(),
+            Self::SignalRed => rgb(0xDA463B).into(),
+            Self::Coral => rgb(0xE26456).into(),
+            Self::HotPink => rgb(0xD54A8F).into(),
+            Self::Orchid => rgb(0xB75BBA).into(),
+            Self::ElectricViolet => rgb(0x8564D5).into(),
+            Self::IndigoBlue => rgb(0x556FCD).into(),
+            Self::Azure => rgb(0x388FDA).into(),
+            Self::Cyan => rgb(0x2EB3C3).into(),
+            Self::Turquoise => rgb(0x32B49F).into(),
+            Self::SeaGreen => rgb(0x3EA876).into(),
+            Self::Emerald => rgb(0x46B55C).into(),
+            Self::LimeGreen => rgb(0x84C245).into(),
+            Self::Olive => rgb(0x99A33F).into(),
+            Self::SlateBlue => rgb(0x6682A3).into(),
+            Self::SteelGray => rgb(0x7E8B97).into(),
+            Self::GraphiteGray => rgb(0x59626C).into(),
+            Self::WhiteSmoke => rgb(0xDDE2E6).into(),
+        }
+    }
+}
 
 pub struct ChannelStrip {
     strip: Entity<Strip>,
@@ -18,7 +82,10 @@ pub struct ChannelStrip {
 
 impl ChannelStrip {
     pub fn new(strip: &Entity<Strip>, cx: &mut Context<Self>) -> Self {
-        let _subs = vec![cx.observe_and_notify(strip)];
+        let _subs = vec![
+            cx.observe_and_notify(strip),
+            cx.observe_and_notify(&UiState::selected_strip(cx)),
+        ];
 
         Self {
             strip: strip.clone(),
@@ -33,7 +100,7 @@ impl ChannelStrip {
             .w_full()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().accent)
+            .bg(cx.theme().title_bar)
             .py_2()
             .px_2()
     }
@@ -46,26 +113,72 @@ impl Render for ChannelStrip {
         cx: &mut gpui_kit::prelude::Context<Self>,
     ) -> impl gpui_kit::prelude::IntoElement {
         let strip = self.strip.read(cx);
+        let strip_idx = strip.strip_idx;
+
+        let is_selected = UiState::selected_strip(cx)
+            .read(cx)
+            .is_some_and(|idx| idx == strip_idx);
 
         div()
+            .id("strip")
+            .on_click(move |_, _, cx| {
+                UiState::selected_strip(cx).update(cx, |s, cx| {
+                    *s = Some(strip_idx);
+                    cx.notify();
+                })
+            })
             .w_24()
             .h_full()
-            .border_1()
-            .border_color(cx.theme().border)
+            .when_else(
+                is_selected,
+                |this| this.border_1().border_color(cx.theme().ring),
+                |this| this.border_r_1().border_color(cx.theme().border),
+            )
             .flex()
             .flex_col()
             .items_center()
             .child(
-                Self::strip_section(cx)
-                    .text_center()
-                    .child(strip.name.clone()),
+                div()
+                    .w_full()
+                    .h_2()
+                    .bg(ChannelStripColor::default().into_hsla()),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .py_4()
+                    .bg(cx.theme().accent)
+                    .line_height(rems(1.0))
+                    .child(
+                        div()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("{:0>2}", self.strip.read(cx).input + 1)),
+                    )
+                    .child(div().text_base().font_semibold().child(strip.name.clone())),
             )
             .child(
                 Self::strip_section(cx)
                     .flex()
-                    .flex_col()
-                    .child("Hello")
-                    .child("World"),
+                    .justify_between()
+                    .py_1()
+                    .px_2()
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!(
+                        "IN {}",
+                        self.strip.read(cx).get_input_channel_str()
+                    ))
+                    .child(match self.strip.read(cx).width {
+                        dspd_api::Width::Mono => "M",
+                        dspd_api::Width::Stereo => "ST",
+                    }),
             )
             .when_some(strip.get_input_level_meters(cx), |this, levels| {
                 this.child(
@@ -81,14 +194,10 @@ impl Render for ChannelStrip {
             .child(
                 Self::strip_section(cx)
                     .flex_1()
-                    .bg(cx.theme().background)
-                    .border_2()
-                    .border_color(cx.theme().accent)
                     .flex()
                     .flex_col()
-                    .py_2()
-                    .px_1()
-                    .gap_1()
+                    .p_2()
+                    .gap(rems(0.3))
                     .children(strip.stages_without_io_meters(cx).map(|stage| {
                         div()
                             .bg(cx.theme().primary)
@@ -96,7 +205,7 @@ impl Render for ChannelStrip {
                             .text_xs()
                             .font_bold()
                             .w_full()
-                            .h_10()
+                            .h_8()
                             .p_2()
                             .rounded(cx.theme().radius * 0.5)
                             .child(
@@ -111,21 +220,26 @@ impl Render for ChannelStrip {
                         Button::new("add-stage")
                             .secondary()
                             .w_full()
-                            .h_10()
+                            .h_8()
                             .p_2()
                             .rounded(ButtonRounded::Small)
+                            .text_xs()
                             .child("+"),
                     ),
             ) // plugin list
             .when_some(strip.get_output_level_meters(cx), |this, levels| {
                 this.child(
-                    Self::strip_section(cx).flex().justify_center().child(
-                        div().h_40().child(
-                            LevelMeter::new(levels)
-                                .with_labels(8)
-                                .with_label_font_size(rems(0.5)),
+                    Self::strip_section(cx)
+                        .border_b_0()
+                        .flex()
+                        .justify_center()
+                        .child(
+                            div().h_40().child(
+                                LevelMeter::new(levels)
+                                    .with_labels(8)
+                                    .with_label_font_size(rems(0.5)),
+                            ),
                         ),
-                    ),
                 )
             })
     }

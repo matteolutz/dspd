@@ -202,7 +202,7 @@ impl RenderOnce for LevelMeter {
                 div()
                     .w_2()
                     .h_full()
-                    .bg(cx.theme().accent)
+                    .bg(cx.theme().border)
                     .flex()
                     .when_else(
                         self.mode.is_meter_upwards(),

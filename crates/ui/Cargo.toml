@@ -14,3 +14,4 @@ async-tungstenite = { version = "*", features = ["smol-runtime"] }
 futures-util = "0.3"
 reqwest = { version = "0.13.5", features = ["blocking"] }
 dspd-api.workspace = true
+itertools = "0.15.0"

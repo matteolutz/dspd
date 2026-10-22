@@ -24,6 +24,8 @@ pub struct UiState {
     registry: Entity<Registry>,
     session: Entity<Session>,
 
+    selected_strip: Entity<Option<usize>>,
+
     websocket: Entity<WebSocket>,
 
     _tasks: Vec<Task<()>>,
@@ -51,6 +53,10 @@ impl UiState {
         cx.global::<Self>().session.read(cx).strips.iter().cloned()
     }
 
+    pub fn selected_strip(cx: &App) -> Entity<Option<usize>> {
+        cx.global::<Self>().selected_strip.clone()
+    }
+
     pub fn strip_at(idx: usize, cx: &App) -> Option<Entity<Strip>> {
         cx.global::<Self>()
             .session
@@ -58,6 +64,10 @@ impl UiState {
             .strips
             .get(idx)
             .cloned()
+    }
+
+    pub fn is_websocket_connected(cx: &App) -> Entity<bool> {
+        cx.global::<Self>().websocket.read(cx).is_connected.clone()
     }
 }
 
@@ -165,6 +175,8 @@ impl UiState {
 
         let (stats, stats_task) = EngineStats::start_fetching(&server_url, cx);
 
+        let selected_strip = cx.new(|_| None);
+
         let _tasks = vec![stats_task];
         let _subs = vec![websocket_evt_sub];
 
@@ -175,6 +187,7 @@ impl UiState {
             registry,
             session,
             websocket,
+            selected_strip,
             _tasks,
             _subs,
         };

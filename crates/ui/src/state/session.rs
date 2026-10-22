@@ -104,20 +104,17 @@ impl Session {
             strip.set_stage_order(order, cx);
         });
     }
-}
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StripWidth {
-    Mono,
-    Stereo,
+    pub fn strips(&self) -> impl Iterator<Item = &Entity<Strip>> {
+        self.strips.iter()
+    }
 }
 
 #[derive(serde::Deserialize)]
 pub struct SerializableStrip {
     name: String,
 
-    width: StripWidth,
+    width: dspd_api::Width,
 
     input: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -133,10 +130,11 @@ pub struct Strip {
     registry: WeakEntity<Registry>,
 
     /// The strips idx in the strip list
-    strip_idx: usize,
+    pub(crate) strip_idx: usize,
 
     pub(crate) name: SharedString,
     pub(crate) input: usize,
+    pub(crate) width: dspd_api::Width,
 
     chain: Vec<Entity<Stage>>,
 }
@@ -180,6 +178,13 @@ impl Strip {
                 .get_meters(cx)
                 .map(|(_, _, meter_value)| meter_value.unwrap_or(0.0)),
         )
+    }
+
+    pub fn get_input_channel_str(&self) -> String {
+        match self.width {
+            dspd_api::Width::Mono => self.input.to_string(),
+            dspd_api::Width::Stereo => format!("{}+{}", self.input, self.input + 1),
+        }
     }
 
     pub fn set_param(&self, stage_id: u32, param_id: u32, value: f64, cx: &mut App) {
@@ -295,6 +300,7 @@ impl Strip {
             strip_idx,
             name: SharedString::from(strip.name),
             input: strip.input,
+            width: strip.width,
             chain: strip
                 .chain
                 .into_iter()

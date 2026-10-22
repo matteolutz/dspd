@@ -1,19 +1,25 @@
 use gpui_kit::base::{Tab, Tabs};
-use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::scroll::ScrollableElement;
+use gpui_kit::component::{green_500, ActiveTheme};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use itertools::Itertools;
 
 use crate::components::ChannelStrip;
 use crate::context::GpuiContextExtension;
-use crate::state::{EngineStats, UiState};
+use crate::state::{EngineStats, Session, UiState};
 
 mod components;
 mod context;
+mod hsla;
 mod state;
 mod theme;
 
 struct HelloWorld {
     stats: Entity<EngineStats>,
+    is_up: Entity<bool>,
+
+    session: Entity<Session>,
 
     strips: Vec<Entity<components::ChannelStrip>>,
     selected_tab: usize,
@@ -24,6 +30,8 @@ struct HelloWorld {
 impl HelloWorld {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let stats = UiState::stats(cx);
+        let is_up = UiState::is_websocket_connected(cx);
+        let session = UiState::session(cx);
 
         // kinda dumb to collect and then map, but this is the easiest way to get a Vec of entities
         let strips = UiState::strips(cx)
@@ -35,11 +43,15 @@ impl HelloWorld {
         let _subs = vec![
             cx.observe_and_notify(&UiState::meters(cx)),
             cx.observe_and_notify(&stats),
+            cx.observe_and_notify(&is_up),
+            cx.observe_and_notify(&session),
         ];
 
         Self {
             stats,
             strips,
+            is_up,
+            session,
             selected_tab: 0,
             _subs,
         }
@@ -54,32 +66,32 @@ impl Render for HelloWorld {
             .size_full()
             .items_center()
             .justify_center()
-            .gap_2()
-            .p_2()
             .child(
                 div()
                     .flex()
                     .w_full()
-                    .h_24()
-                    .border_1()
+                    .h_20()
+                    .py_2()
+                    .px_8()
+                    .border_b_1()
                     .border_color(cx.theme().border)
+                    .bg(cx.theme().title_bar)
                     .child(div().flex_1())
-                    .p_1()
                     .child(
                         Tabs::new("tabs")
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .rounded_md()
+                            .rounded(cx.theme().radius)
                             .flex_1()
+                            .max_w_112()
                             .h_full()
                             .flex()
-                            .bg(cx.theme().accent)
+                            .bg(cx.theme().secondary)
                             .overflow_hidden()
                             .children(
                                 ["Strips", "Rack", "Patch", "Setup"]
                                     .into_iter()
                                     .enumerate()
-                                    .map(|(index, label)| {
+                                    .with_position()
+                                    .map(|(label_pos, (index, label))| {
                                         let entity = cx.entity().downgrade();
                                         Tab::new(index)
                                             .flex_1()
@@ -87,9 +99,23 @@ impl Render for HelloWorld {
                                             .h_full()
                                             .flex()
                                             .items_center()
-                                            .when(self.selected_tab == index, |this| {
-                                                this.font_weight(gpui::FontWeight::SEMIBOLD)
-                                                    .bg(cx.theme().primary)
+                                            .when_else(
+                                                self.selected_tab == index,
+                                                |this| {
+                                                    this.font_weight(gpui::FontWeight::BOLD)
+                                                        .bg(cx.theme().primary)
+                                                },
+                                                |this| {
+                                                    this.hover(|this| {
+                                                        this.bg(cx.theme().secondary_hover)
+                                                    })
+                                                },
+                                            )
+                                            .when(label_pos.is_first(), |this| {
+                                                this.rounded_l(cx.theme().radius)
+                                            })
+                                            .when(label_pos.is_last(), |this| {
+                                                this.rounded_r(cx.theme().radius)
                                             })
                                             .on_click(move |_, _, cx| {
                                                 _ = entity.update(cx, |this, cx| {
@@ -97,31 +123,68 @@ impl Render for HelloWorld {
                                                     cx.notify();
                                                 });
                                             })
-                                            .py_2()
-                                            .child(
-                                                div()
-                                                    .px_2()
-                                                    .size_full()
-                                                    .flex()
-                                                    .justify_center()
-                                                    .items_center()
-                                                    .child(label)
-                                                    .when(index > 0, |this| {
-                                                        this.border_l_2()
-                                                            .border_color(cx.theme().foreground)
-                                                    }),
-                                            )
+                                            .child(label)
                                     }),
                             ),
                     )
-                    .child(div().flex_1()),
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_family(&cx.theme().mono_font_family)
+                            .text_color(cx.theme().muted_foreground)
+                            .flex_1()
+                            .flex()
+                            .justify_end()
+                            .gap_4()
+                            .child(
+                                div().flex().items_center().gap_1().child("DSP").child(
+                                    div().text_color(green_500()).child(format!(
+                                        "{:.0}%",
+                                        self.stats.read(cx).avg_load_percent
+                                    )),
+                                ),
+                            )
+                            .when(*self.is_up.read(cx), |this| {
+                                this.child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .text_color(green_500())
+                                        .child(div().rounded_full().size_2().bg(green_500()))
+                                        .child("SYNC"),
+                                )
+                            }),
+                    ),
             )
             .child(
                 div()
+                    .id("strips")
+                    .overflow_x_scrollbar()
                     .w_full()
                     .flex_1()
                     .flex()
                     .children(self.strips.iter().cloned()),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .h_10()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().title_bar)
+                    .flex()
+                    .justify_between()
+                    .items_center()
+                    .px_8()
+                    .text_sm()
+                    .font_family(&cx.theme().mono_font_family)
+                    .text_color(cx.theme().muted_foreground)
+                    .child(div())
+                    .child(format!(
+                        "{} strips · ?? plugins",
+                        self.session.read(cx).strips().count()
+                    )),
             )
     }
 }

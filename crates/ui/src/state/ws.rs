@@ -1,7 +1,7 @@
 use async_tungstenite::{smol::connect_async, tungstenite::Message};
 use dspd_api::{MeterInfo, StageSpec};
 use futures_util::StreamExt;
-use gpui_kit::{private::serde, Context, EventEmitter, Task};
+use gpui_kit::{private::serde, App, AppContext, Context, Entity, EventEmitter, Task};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -50,6 +50,7 @@ pub enum WebSocketMessage {
 
 pub struct WebSocket {
     last_generation: Option<u64>,
+    pub(super) is_connected: Entity<bool>,
     _task: Task<()>,
 }
 
@@ -108,106 +109,130 @@ impl WebSocket {
 
         println!("websocket connecting to: {}", ws_address);
 
-        let _task = cx.spawn(async move |this, cx| {
-            let Ok((mut ws_stream, _)) = connect_async(ws_address).await else {
-                return;
-            };
+        let is_connected = cx.new(|_| false);
 
-            while let Some(Ok(message)) = ws_stream.next().await {
-                match message {
-                    Message::Text(text) => {
-                        if let Ok(msg) = serde_json::from_str::<WebSocketMessage>(&text) {
-                            match msg {
-                                WebSocketMessage::MeterLayout { meters, .. } => {
-                                    _ = this.update(cx, |_, cx| {
-                                        cx.emit(WebSocketEvent::UpdateMeterInfos { meters })
-                                    });
-                                }
-                                WebSocketMessage::Meters { values } => {
-                                    _ = this.update(cx, |_, cx| {
-                                        cx.emit(WebSocketEvent::UpdateMeterValues { values })
-                                    });
-                                }
-                                WebSocketMessage::Restarted { generation } => {
-                                    let last_generation = this
-                                        .read_with(cx, |this, _| this.last_generation)
-                                        .ok()
-                                        .flatten();
+        let _task = cx.spawn({
+            let is_connected = is_connected.clone();
 
-                                    if last_generation.is_some_and(|lg| lg >= generation) {
-                                        continue;
+            async move |this, cx| {
+                let Ok((mut ws_stream, _)) = connect_async(ws_address).await else {
+                    return;
+                };
+
+                is_connected.update(cx, |this, cx| {
+                    *this = true;
+                    cx.notify();
+                });
+
+                while let Some(Ok(message)) = ws_stream.next().await {
+                    match message {
+                        Message::Text(text) => {
+                            if let Ok(msg) = serde_json::from_str::<WebSocketMessage>(&text) {
+                                match msg {
+                                    WebSocketMessage::MeterLayout { meters, .. } => {
+                                        _ = this.update(cx, |_, cx| {
+                                            cx.emit(WebSocketEvent::UpdateMeterInfos { meters })
+                                        });
                                     }
+                                    WebSocketMessage::Meters { values } => {
+                                        _ = this.update(cx, |_, cx| {
+                                            cx.emit(WebSocketEvent::UpdateMeterValues { values })
+                                        });
+                                    }
+                                    WebSocketMessage::Restarted { generation } => {
+                                        let last_generation = this
+                                            .read_with(cx, |this, _| this.last_generation)
+                                            .ok()
+                                            .flatten();
 
-                                    _ = this.update(cx, |this, cx| {
-                                        this.last_generation = Some(generation);
-                                        cx.emit(WebSocketEvent::EngineRestarted);
-                                    });
-                                }
-                                WebSocketMessage::ParamChanged {
-                                    strip,
-                                    stage_id,
-                                    param_id,
-                                    value,
-                                } => {
-                                    _ = this.update(cx, |_, cx| {
-                                        cx.emit(WebSocketEvent::UpdateParam {
-                                            strip,
-                                            stage_id,
-                                            param_id,
-                                            value,
-                                        })
-                                    });
-                                }
-                                WebSocketMessage::StageInserted {
-                                    strip,
-                                    stage_id,
-                                    position,
-                                    stage,
-                                } => {
-                                    _ = this.update(cx, |_, cx| {
-                                        cx.emit(WebSocketEvent::StageInserted {
-                                            strip,
-                                            stage_id,
-                                            position,
-                                            stage,
-                                        })
-                                    });
-                                }
-                                WebSocketMessage::StageRemoved { strip, stage_id } => {
-                                    _ = this.update(cx, |_, cx| {
-                                        cx.emit(WebSocketEvent::StageRemoved { strip, stage_id })
-                                    });
-                                }
-                                WebSocketMessage::StageMoved {
-                                    strip,
-                                    stage_id,
-                                    new_position,
-                                } => {
-                                    _ = this.update(cx, |_, cx| {
-                                        cx.emit(WebSocketEvent::StageMoved {
-                                            strip,
-                                            stage_id,
-                                            new_position,
-                                        })
-                                    });
-                                }
-                                WebSocketMessage::StageOrder { strip, order } => {
-                                    _ = this.update(cx, |_, cx| {
-                                        cx.emit(WebSocketEvent::StageOrder { strip, order })
-                                    });
+                                        if last_generation.is_some_and(|lg| lg >= generation) {
+                                            continue;
+                                        }
+
+                                        _ = this.update(cx, |this, cx| {
+                                            this.last_generation = Some(generation);
+                                            cx.emit(WebSocketEvent::EngineRestarted);
+                                        });
+                                    }
+                                    WebSocketMessage::ParamChanged {
+                                        strip,
+                                        stage_id,
+                                        param_id,
+                                        value,
+                                    } => {
+                                        _ = this.update(cx, |_, cx| {
+                                            cx.emit(WebSocketEvent::UpdateParam {
+                                                strip,
+                                                stage_id,
+                                                param_id,
+                                                value,
+                                            })
+                                        });
+                                    }
+                                    WebSocketMessage::StageInserted {
+                                        strip,
+                                        stage_id,
+                                        position,
+                                        stage,
+                                    } => {
+                                        _ = this.update(cx, |_, cx| {
+                                            cx.emit(WebSocketEvent::StageInserted {
+                                                strip,
+                                                stage_id,
+                                                position,
+                                                stage,
+                                            })
+                                        });
+                                    }
+                                    WebSocketMessage::StageRemoved { strip, stage_id } => {
+                                        _ = this.update(cx, |_, cx| {
+                                            cx.emit(WebSocketEvent::StageRemoved {
+                                                strip,
+                                                stage_id,
+                                            })
+                                        });
+                                    }
+                                    WebSocketMessage::StageMoved {
+                                        strip,
+                                        stage_id,
+                                        new_position,
+                                    } => {
+                                        _ = this.update(cx, |_, cx| {
+                                            cx.emit(WebSocketEvent::StageMoved {
+                                                strip,
+                                                stage_id,
+                                                new_position,
+                                            })
+                                        });
+                                    }
+                                    WebSocketMessage::StageOrder { strip, order } => {
+                                        _ = this.update(cx, |_, cx| {
+                                            cx.emit(WebSocketEvent::StageOrder { strip, order })
+                                        });
+                                    }
                                 }
                             }
                         }
+                        Message::Close(_) => break,
+                        _ => {}
                     }
-                    Message::Close(_) => break,
-                    _ => {}
                 }
+
+                is_connected.update(cx, |this, cx| {
+                    *this = false;
+                    cx.notify();
+                });
             }
         });
 
         Self {
             last_generation: None,
+            is_connected,
             _task,
         }
+    }
+
+    pub fn is_connected(&self, cx: &App) -> bool {
+        *self.is_connected.read(cx)
     }
 }
