@@ -10,8 +10,14 @@
       "input": 0,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -21,8 +27,14 @@
       "input": 1,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -32,8 +44,14 @@
       "input": 2,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -43,8 +61,14 @@
       "input": 3,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -54,8 +78,14 @@
       "input": 4,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -65,8 +95,14 @@
       "input": 5,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -76,8 +112,14 @@
       "input": 6,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -87,8 +129,14 @@
       "input": 7,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -98,8 +146,14 @@
       "input": 8,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -109,8 +163,14 @@
       "input": 9,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -120,8 +180,14 @@
       "input": 10,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -131,8 +197,14 @@
       "input": 11,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -142,8 +214,14 @@
       "input": 12,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -153,8 +231,14 @@
       "input": 13,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -164,8 +248,14 @@
       "input": 14,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -175,8 +265,14 @@
       "input": 15,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -186,8 +282,14 @@
       "input": 16,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -197,8 +299,14 @@
       "input": 17,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -208,8 +316,14 @@
       "input": 18,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -219,8 +333,14 @@
       "input": 19,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -230,8 +350,14 @@
       "input": 20,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -241,8 +367,14 @@
       "input": 21,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -252,8 +384,14 @@
       "input": 22,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -263,8 +401,14 @@
       "input": 23,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -274,8 +418,14 @@
       "input": 24,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -285,8 +435,14 @@
       "input": 25,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -296,8 +452,14 @@
       "input": 26,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -307,8 +469,14 @@
       "input": 27,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -318,8 +486,14 @@
       "input": 28,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     },
@@ -329,8 +503,14 @@
       "input": 30,
       "chain": [
         {
+          "type": "peak_meter"
+        },
+        {
           "type": "gain",
-          "gain_db": -3.0
+          "0": -3.0
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     }

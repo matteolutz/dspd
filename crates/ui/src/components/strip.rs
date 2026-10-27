@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use gpui_kit::{
     base::StyledExt,
     component::{
@@ -6,12 +8,15 @@ use gpui_kit::{
     },
     div,
     prelude::FluentBuilder,
-    rems, rgb, App, Context, Entity, Hsla, InteractiveElement, ParentElement, Render,
+    rems, rgb, App, AppContext, Context, Entity, Hsla, InteractiveElement, ParentElement, Render,
     StatefulInteractiveElement, Styled, Subscription,
 };
 
 use crate::{
-    components::meters::LevelMeter,
+    components::{
+        meters::LevelMeter,
+        mixing::{Knob, KnobEvent, MixingComponentValue},
+    },
     context::GpuiContextExtension,
     state::{Strip, UiState},
 };
@@ -77,18 +82,40 @@ impl Into<Hsla> for ChannelStripColor {
 
 pub struct ChannelStrip {
     strip: Entity<Strip>,
+
+    knob: Entity<Knob>,
+
     _subs: Vec<Subscription>,
 }
 
 impl ChannelStrip {
     pub fn new(strip: &Entity<Strip>, cx: &mut Context<Self>) -> Self {
+        let gain_value = strip
+            .read(cx)
+            .stages()
+            .nth(1)
+            .unwrap()
+            .read(cx)
+            .get_param(0)
+            .unwrap();
+        let knob = cx.new(|cx| Knob::new(gain_value as f32, cx));
+
         let _subs = vec![
             cx.observe_and_notify(strip),
             cx.observe_and_notify(&UiState::selected_strip(cx)),
+            cx.observe_and_notify(&UiState::meters(cx)),
+            cx.subscribe(&knob, |this, _, evt: &KnobEvent, cx| match evt {
+                KnobEvent::ValueChanged(value) => {
+                    let client = reqwest::blocking::Client::new();
+                    client.post("http://localhost:8089/")
+                }
+                _ => {}
+            }),
         ];
 
         Self {
             strip: strip.clone(),
+            knob,
             _subs,
         }
     }
@@ -127,11 +154,12 @@ impl Render for ChannelStrip {
                     cx.notify();
                 })
             })
+            .flex_shrink_0()
             .w_24()
             .h_full()
             .when_else(
                 is_selected,
-                |this| this.border_1().border_color(cx.theme().ring),
+                |this| this.border_1().border_t_0().border_color(cx.theme().ring),
                 |this| this.border_r_1().border_color(cx.theme().border),
             )
             .flex()
@@ -227,6 +255,13 @@ impl Render for ChannelStrip {
                             .child("+"),
                     ),
             ) // plugin list
+            .child(
+                Self::strip_section(cx)
+                    .flex()
+                    .justify_center()
+                    .items_center()
+                    .child(self.knob.clone()),
+            )
             .when_some(strip.get_output_level_meters(cx), |this, levels| {
                 this.child(
                     Self::strip_section(cx)

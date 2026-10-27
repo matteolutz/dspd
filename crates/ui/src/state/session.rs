@@ -41,7 +41,7 @@ impl Session {
         }
     }
 
-    pub fn set_param(
+    pub(super) fn set_param(
         &self,
         strip_idx: usize,
         stage_id: u32,
@@ -58,7 +58,7 @@ impl Session {
         });
     }
 
-    pub fn insert_stage(
+    pub(super) fn insert_stage(
         &self,
         strip_idx: usize,
         stage: StageSpec,
@@ -75,7 +75,7 @@ impl Session {
         });
     }
 
-    pub fn remove_stage(&self, strip_idx: usize, stage_id: u32, cx: &mut App) {
+    pub(super) fn remove_stage(&self, strip_idx: usize, stage_id: u32, cx: &mut App) {
         let Some(strip) = self.strips.get(strip_idx) else {
             return;
         };
@@ -85,7 +85,13 @@ impl Session {
         });
     }
 
-    pub fn move_stage(&self, strip_idx: usize, stage_id: u32, new_position: usize, cx: &mut App) {
+    pub(super) fn move_stage(
+        &self,
+        strip_idx: usize,
+        stage_id: u32,
+        new_position: usize,
+        cx: &mut App,
+    ) {
         let Some(strip) = self.strips.get(strip_idx) else {
             return;
         };
@@ -95,7 +101,7 @@ impl Session {
         });
     }
 
-    pub fn set_stage_order(&self, strip_idx: usize, order: Vec<u32>, cx: &mut App) {
+    pub(super) fn set_stage_order(&self, strip_idx: usize, order: Vec<u32>, cx: &mut App) {
         let Some(strip) = self.strips.get(strip_idx) else {
             return;
         };
@@ -187,7 +193,7 @@ impl Strip {
         }
     }
 
-    pub fn set_param(&self, stage_id: u32, param_id: u32, value: f64, cx: &mut App) {
+    pub(super) fn set_param(&self, stage_id: u32, param_id: u32, value: f64, cx: &mut App) {
         let Some(stage) = self.chain.iter().find(|s| s.read(cx).stage_id == stage_id) else {
             return;
         };
@@ -195,7 +201,7 @@ impl Strip {
         stage.update(cx, |stage, cx| stage.set_param(param_id, value, cx));
     }
 
-    pub fn insert_stage(
+    pub(super) fn insert_stage(
         &mut self,
         stage: StageSpec,
         stage_id: u32,
@@ -214,13 +220,18 @@ impl Strip {
         cx.notify();
     }
 
-    pub fn remove_stage(&mut self, stage_id: u32, cx: &mut Context<Self>) {
+    pub(super) fn remove_stage(&mut self, stage_id: u32, cx: &mut Context<Self>) {
         self.chain
             .retain(|stage| stage.read(cx).stage_id != stage_id);
         cx.notify();
     }
 
-    pub fn move_stage(&mut self, stage_id: u32, new_position: usize, cx: &mut Context<Self>) {
+    pub(super) fn move_stage(
+        &mut self,
+        stage_id: u32,
+        new_position: usize,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(pos) = self
             .chain
             .iter()
@@ -232,7 +243,7 @@ impl Strip {
         }
     }
 
-    pub fn set_stage_order(&mut self, order: Vec<u32>, cx: &mut Context<Self>) {
+    pub(super) fn set_stage_order(&mut self, order: Vec<u32>, cx: &mut Context<Self>) {
         let mut new_chain = Vec::with_capacity(self.chain.len());
 
         for stage_id in order {
@@ -381,7 +392,15 @@ impl Stage {
             .meters_for_stage(self.strip_idx, self.stage_id)
     }
 
-    pub fn set_param(&mut self, param_id: u32, value: f64, cx: &mut Context<Self>) {
+    pub fn get_param(&self, param_id: u32) -> Option<f64> {
+        match &self.spec {
+            dspd_api::StageSpec::Native(native_spec) => {
+                native_spec.settings.get(&param_id).copied()
+            }
+        }
+    }
+
+    pub(super) fn set_param(&mut self, param_id: u32, value: f64, cx: &mut Context<Self>) {
         match &mut self.spec {
             dspd_api::StageSpec::Native(native_spec) => {
                 native_spec.settings.insert(param_id, value);

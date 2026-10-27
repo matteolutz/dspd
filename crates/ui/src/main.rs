@@ -1,18 +1,18 @@
 use gpui_kit::base::{Tab, Tabs};
-use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::{green_500, ActiveTheme};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use itertools::Itertools;
 
-use crate::components::ChannelStrip;
 use crate::context::GpuiContextExtension;
 use crate::state::{EngineStats, Session, UiState};
+use crate::tabs::StripsTab;
 
 mod components;
 mod context;
 mod hsla;
 mod state;
+mod tabs;
 mod theme;
 
 struct HelloWorld {
@@ -21,8 +21,9 @@ struct HelloWorld {
 
     session: Entity<Session>,
 
-    strips: Vec<Entity<components::ChannelStrip>>,
+    // Tabs
     selected_tab: usize,
+    strips_tab: Entity<tabs::StripsTab>,
 
     _subs: Vec<Subscription>,
 }
@@ -33,15 +34,9 @@ impl HelloWorld {
         let is_up = UiState::is_websocket_connected(cx);
         let session = UiState::session(cx);
 
-        // kinda dumb to collect and then map, but this is the easiest way to get a Vec of entities
-        let strips = UiState::strips(cx)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|strip| cx.new(|cx| ChannelStrip::new(&strip, cx)))
-            .collect();
+        let strips_tab = cx.new(|cx| StripsTab::new(cx));
 
         let _subs = vec![
-            cx.observe_and_notify(&UiState::meters(cx)),
             cx.observe_and_notify(&stats),
             cx.observe_and_notify(&is_up),
             cx.observe_and_notify(&session),
@@ -49,17 +44,19 @@ impl HelloWorld {
 
         Self {
             stats,
-            strips,
             is_up,
             session,
+
             selected_tab: 0,
+            strips_tab,
+
             _subs,
         }
     }
 }
 
 impl Render for HelloWorld {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
@@ -157,15 +154,18 @@ impl Render for HelloWorld {
                             }),
                     ),
             )
-            .child(
-                div()
-                    .id("strips")
-                    .overflow_x_scrollbar()
+            .child(match self.selected_tab {
+                0 => self.strips_tab.clone().into_any_element(),
+                _ => div()
                     .w_full()
                     .flex_1()
                     .flex()
-                    .children(self.strips.iter().cloned()),
-            )
+                    .justify_center()
+                    .items_center()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("TODO: this tab")
+                    .into_any_element(),
+            })
             .child(
                 div()
                     .w_full()
@@ -189,10 +189,24 @@ impl Render for HelloWorld {
     }
 }
 
+mod actions {
+    use gpui_kit::{App, KeyBinding};
+
+    gpui_kit::actions!(dspd, [Quit]);
+
+    pub fn init(cx: &mut App) {
+        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        cx.on_action(|_: &Quit, cx| cx.quit());
+    }
+}
+
 fn main() {
     application().with_assets(assets::Assets).run(|cx| {
         init(cx);
         theme::set_theme(cx);
+
+        actions::init(cx);
+        tabs::init(cx);
 
         UiState::init("http://localhost:8080", cx);
 

@@ -1,34 +1,41 @@
 use gpui_kit::{
     canvas,
     component::{black, ActiveTheme},
-    div, px, DispatchPhase, ElementId, EventEmitter, InteractiveElement, MouseMoveEvent,
-    ParentElement, PathBuilder, Pixels, Point, Render, Styled,
+    div, px, AppContext, Context, DispatchPhase, Entity, EventEmitter, InteractiveElement,
+    MouseMoveEvent, ParentElement, PathBuilder, Pixels, Point, Render, Styled, Subscription,
 };
 
-use crate::{components::mixing::MixingComponentValue, context::GpuiContextExtension};
+use crate::context::GpuiContextExtension;
 
 const MOUSE_SENSITIVITY: f32 = 0.005;
 
 pub enum KnobEvent {
     MouseDown,
     MouseUp,
+    ValueChanged(f32),
 }
 
 pub struct Knob {
-    id: ElementId,
-
-    value: MixingComponentValue<f32>,
-
+    value: Entity<f32>,
     mouse_down_pos: Option<Point<Pixels>>,
+
+    _subs: Vec<Subscription>,
 }
 
 impl Knob {
-    pub fn new(id: impl Into<ElementId>, value: impl Into<MixingComponentValue<f32>>) -> Self {
+    pub fn new(value: f32, cx: &mut Context<Self>) -> Self {
+        let value = cx.new(|_| value.clamp(0.0, 1.0));
+        let _subs = vec![cx.observe_and_notify(&value)];
+
         Self {
-            id: id.into(),
-            value: value.into(),
+            value,
             mouse_down_pos: None,
+            _subs,
         }
+    }
+
+    pub fn value(&self) -> &Entity<f32> {
+        &self.value
     }
 
     fn handle_left_mouse_down(
@@ -58,14 +65,14 @@ impl Render for Knob {
         _window: &mut gpui_kit::Window,
         cx: &mut gpui_kit::prelude::Context<Self>,
     ) -> impl gpui_kit::prelude::IntoElement {
-        let value = *self.value.read(cx);
+        let value = self.value.read(cx);
         let rotation = (value * 270.0) - 225.0;
 
         div()
-            .id(self.id.clone())
+            .flex_shrink_0()
             .size_11()
             .rounded_full()
-            .bg(black())
+            .bg(cx.theme().border)
             .flex()
             .justify_center()
             .items_center()
@@ -99,13 +106,18 @@ impl Render for Knob {
                                                 * MOUSE_SENSITIVITY
                                                 * if is_fine { 0.1 } else { 1.0 };
 
-                                            this.value.update(cx, |value, cx| {
-                                                *value = (*value - value_delta).clamp(0.0, 1.0);
+                                            let new_value = this.value.update(cx, |value, cx| {
+                                                let new_value =
+                                                    (*value - value_delta).clamp(0.0, 1.0);
+                                                *value = new_value;
                                                 cx.notify();
+                                                new_value
                                             });
 
                                             this.mouse_down_pos = Some(event.position);
+
                                             cx.notify();
+                                            cx.emit(KnobEvent::ValueChanged(new_value));
                                         });
                                     },
                                 );
@@ -128,7 +140,7 @@ impl Render for Knob {
                     )
                     .size_10()
                     .rounded_full()
-                    .bg(cx.theme().border)
+                    .bg(cx.theme().background)
                     .border_3()
                     .border_color(cx.theme().accent)
                     .flex()
