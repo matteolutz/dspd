@@ -20,7 +20,6 @@ impl StripSelection {
     }
 
     pub fn select_strip(&mut self, strip_idx: usize, cx: &mut Context<Self>) {
-        println!("selecting strip: {}", strip_idx);
         self.update_strip(cx, |_, _| Some(strip_idx));
     }
 
