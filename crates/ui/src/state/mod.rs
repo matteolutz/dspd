@@ -1,4 +1,6 @@
 mod ws;
+use std::sync::Arc;
+
 pub use ws::*;
 
 mod session;
@@ -12,12 +14,15 @@ pub use meters::*;
 
 mod registry;
 
+mod client;
+pub use client::*;
+
 use gpui_kit::{App, AppContext, Entity, Global, Subscription, Task, WeakEntity};
 
 use crate::state::registry::Registry;
 
 pub struct UiState {
-    server_url: reqwest::Url,
+    client: Arc<DspdHttpClient>,
 
     meters: Entity<MetersState>,
     stats: Entity<EngineStats>,
@@ -33,6 +38,10 @@ pub struct UiState {
 }
 
 impl UiState {
+    pub fn client(cx: &App) -> &Arc<DspdHttpClient> {
+        &cx.global::<Self>().client
+    }
+
     pub fn meters(cx: &App) -> Entity<MetersState> {
         cx.global::<Self>().meters.clone()
     }
@@ -75,12 +84,14 @@ impl Global for UiState {}
 
 impl UiState {
     fn get_session(
-        server_url: &reqwest::Url,
+        client: &DspdHttpClient,
         meters: WeakEntity<MetersState>,
         registry: WeakEntity<Registry>,
         cx: &mut App,
     ) -> Session {
-        let body = reqwest::blocking::get(server_url.join("/session").expect("Failed to join URL"))
+        let body = client
+            .get("/session")
+            .send()
             .and_then(|res| res.text())
             .expect("Failed to get session");
         let session: SerializableSession =
@@ -89,8 +100,10 @@ impl UiState {
         Session::from_serializable(session, meters, registry, cx)
     }
 
-    fn get_registry(server_url: &reqwest::Url) -> Registry {
-        let body = reqwest::blocking::get(server_url.join("/plugins").expect("Failed to join URL"))
+    fn get_registry(client: &DspdHttpClient) -> Registry {
+        let body = client
+            .get("/plugins")
+            .send()
             .and_then(|res| res.text())
             .expect("Failed to get plugin registry");
 
@@ -99,17 +112,18 @@ impl UiState {
 
     pub fn init(server_url: impl reqwest::IntoUrl, cx: &mut App) {
         let server_url = server_url.into_url().expect("Failed to parse server URL");
+        let client = DspdHttpClient::new(server_url.clone());
 
         let meters = cx.new(|_| MetersState::default());
-        let registry = cx.new(|_| Self::get_registry(&server_url));
-        let session = cx
-            .new(|cx| Self::get_session(&server_url, meters.downgrade(), registry.downgrade(), cx));
+        let registry = cx.new(|_| Self::get_registry(&client));
+        let session =
+            cx.new(|cx| Self::get_session(&client, meters.downgrade(), registry.downgrade(), cx));
 
         let websocket = cx.new(|cx| WebSocket::start(&server_url, cx));
         let websocket_evt_sub = cx.subscribe(&websocket, |_, evt, cx| match evt {
             WebSocketEvent::EngineRestarted => {
                 let new_session = Self::get_session(
-                    &cx.global::<Self>().server_url.clone(),
+                    &cx.global::<Self>().client.clone(),
                     Self::meters(cx).downgrade(),
                     Self::registry(cx).downgrade(),
                     cx,
@@ -181,7 +195,7 @@ impl UiState {
         let _subs = vec![websocket_evt_sub];
 
         let this = Self {
-            server_url,
+            client: Arc::new(client),
             meters,
             stats,
             registry,

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use gpui_kit::{
     base::StyledExt,
     component::{
@@ -11,14 +9,15 @@ use gpui_kit::{
     rems, rgb, App, AppContext, Context, Entity, Hsla, InteractiveElement, ParentElement, Render,
     StatefulInteractiveElement, Styled, Subscription,
 };
+use serde_json::json;
 
 use crate::{
     components::{
         meters::LevelMeter,
-        mixing::{Knob, KnobEvent, MixingComponentValue},
+        mixing::{Knob, KnobEvent},
     },
     context::GpuiContextExtension,
-    state::{Strip, UiState},
+    state::{RequestBuilderExt, Strip, UiState},
 };
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
@@ -106,8 +105,26 @@ impl ChannelStrip {
             cx.observe_and_notify(&UiState::meters(cx)),
             cx.subscribe(&knob, |this, _, evt: &KnobEvent, cx| match evt {
                 KnobEvent::ValueChanged(value) => {
-                    let client = reqwest::blocking::Client::new();
-                    client.post("http://localhost:8089/")
+                    let strip_idx = this.strip.read(cx).strip_idx;
+                    let db_value = (value * 27.0) - 21.0;
+
+                    match UiState::client(cx)
+                        .post("/params")
+                        .content_type_json()
+                        .body(
+                            json!({
+                                "strip": strip_idx,
+                                "stage": 1,
+                                "param_id": 0,
+                                "value": db_value
+                            })
+                            .to_string(),
+                        )
+                        .send()
+                    {
+                        Ok(res) => println!("res: {}", res.text().unwrap()),
+                        Err(e) => println!("knob failed: {}", e),
+                    }
                 }
                 _ => {}
             }),
