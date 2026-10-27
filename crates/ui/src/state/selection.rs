@@ -6,7 +6,7 @@ pub enum StripSelectionEvent {
     StageChanged(Option<usize>),
 }
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub struct StripSelection {
     selected_strip: Option<usize>,
     selected_stage: Option<usize>,
@@ -15,6 +15,14 @@ pub struct StripSelection {
 impl EventEmitter<StripSelectionEvent> for StripSelection {}
 
 impl StripSelection {
+    pub fn selected_strip(&self) -> Option<usize> {
+        self.selected_strip
+    }
+
+    pub fn selected_stage(&self) -> Option<usize> {
+        self.selected_stage
+    }
+
     pub fn is_strip_selected(&self, strip_idx: usize) -> bool {
         self.selected_strip == Some(strip_idx)
     }

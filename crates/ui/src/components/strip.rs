@@ -126,7 +126,7 @@ impl ChannelStrip {
                         )
                         .send()
                     {
-                        Ok(res) => println!("res: {}", res.text().unwrap()),
+                        Ok(_) => {}
                         Err(e) => println!("knob failed: {}", e),
                     }
                 }

@@ -7,7 +7,6 @@ use itertools::Itertools;
 use crate::context::GpuiContextExtension;
 use crate::state::tab::UiTab;
 use crate::state::{EngineStats, Session, UiState};
-use crate::tabs::StripsTab;
 
 mod components;
 mod context;
@@ -24,6 +23,7 @@ struct HelloWorld {
 
     // Tabs
     strips_tab: Entity<tabs::StripsTab>,
+    rack_tab: Entity<tabs::RackTab>,
 
     _subs: Vec<Subscription>,
 }
@@ -34,13 +34,14 @@ impl HelloWorld {
         let is_up = UiState::is_websocket_connected(cx);
         let session = UiState::session(cx);
 
-        let strips_tab = cx.new(|cx| StripsTab::new(cx));
-
         let _subs = vec![
             cx.observe_and_notify(&stats),
             cx.observe_and_notify(&is_up),
             cx.observe_and_notify(&session),
         ];
+
+        let strips_tab = cx.new(|cx| tabs::StripsTab::new(cx));
+        let rack_tab = cx.new(|cx| tabs::RackTab::new(cx));
 
         Self {
             stats,
@@ -48,6 +49,7 @@ impl HelloWorld {
             session,
 
             strips_tab,
+            rack_tab,
 
             _subs,
         }
@@ -151,7 +153,8 @@ impl Render for HelloWorld {
                     ),
             )
             .child(match selected_tab {
-                UiTab::Strips { .. } => self.strips_tab.clone().into_any_element(),
+                UiTab::Strips => self.strips_tab.clone().into_any_element(),
+                UiTab::Rack => self.rack_tab.clone().into_any_element(),
                 _ => div()
                     .w_full()
                     .flex_1()
