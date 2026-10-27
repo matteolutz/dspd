@@ -14,7 +14,7 @@ use serde_json::json;
 use crate::{
     components::{
         meters::LevelMeter,
-        mixing::{Knob, KnobEvent},
+        mixing::{Knob, KnobEvent, MixingComponentValue},
     },
     context::GpuiContextExtension,
     state::{tab::UiTab, RequestBuilderExt, Strip, UiState},
@@ -89,15 +89,19 @@ pub struct ChannelStrip {
 
 impl ChannelStrip {
     pub fn new(strip: &Entity<Strip>, cx: &mut Context<Self>) -> Self {
-        let gain_value = strip
-            .read(cx)
-            .stages()
-            .nth(1)
-            .unwrap()
-            .read(cx)
-            .get_param(0)
-            .unwrap();
-        let knob = cx.new(|cx| Knob::new(gain_value as f32, cx));
+        let gain_stage = strip.read(cx).stages().nth(1).unwrap().clone();
+
+        let knob_value = cx.new(|cx| {
+            MixingComponentValue::from_entity_with(
+                &gain_stage,
+                |s| {
+                    let db_value = s.get_param(0).unwrap_or(0.0);
+                    ((db_value + 120.0) / 144.0).clamp(0.0, 1.0) as f32
+                },
+                cx,
+            )
+        });
+        let knob = cx.new(|cx| Knob::new(knob_value, cx));
 
         let _subs = vec![
             cx.observe_and_notify(strip),
@@ -106,7 +110,7 @@ impl ChannelStrip {
             cx.subscribe(&knob, |this, _, evt: &KnobEvent, cx| match evt {
                 KnobEvent::ValueChanged(value) => {
                     let strip_idx = this.strip.read(cx).strip_idx;
-                    let db_value = (value * 27.0) - 21.0;
+                    let db_value = (value * 144.0) - 120.0;
 
                     match UiState::client(cx)
                         .post("/params")

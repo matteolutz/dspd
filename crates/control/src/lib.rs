@@ -555,7 +555,7 @@ async fn ws_stream(mut socket: WebSocket, s: Shared, hz: u32) {
                         .send_dspd_event(WebSocketEvent::MeterLayout {
                             meters: infos.to_vec(),
                             hz: None,
-                        });
+                        }).await;
                 }
 
                 // values[i] belongs to the meter in slot i; slots past the last used one are not sent.
@@ -568,7 +568,7 @@ async fn ws_stream(mut socket: WebSocket, s: Shared, hz: u32) {
             }
             event = event_rx.recv() => match event {
                 Ok(evt) => {
-                    _ = socket.send_dspd_event(evt);
+                    _ = socket.send_dspd_event(evt).await;
                 }
                 Err(_) => {
                     // Handle channel closed / lagged error if needed

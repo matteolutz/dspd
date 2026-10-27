@@ -1,11 +1,10 @@
 use gpui_kit::{
-    canvas,
-    component::{black, ActiveTheme},
-    div, px, AppContext, Context, DispatchPhase, Entity, EventEmitter, InteractiveElement,
-    MouseMoveEvent, ParentElement, PathBuilder, Pixels, Point, Render, Styled, Subscription,
+    canvas, component::ActiveTheme, div, px, AppContext, Context, DispatchPhase, Entity,
+    EventEmitter, InteractiveElement, MouseMoveEvent, ParentElement, PathBuilder, Pixels, Point,
+    Render, Styled, Subscription,
 };
 
-use crate::context::GpuiContextExtension;
+use crate::{components::mixing::MixingComponentValue, context::GpuiContextExtension};
 
 const MOUSE_SENSITIVITY: f32 = 0.005;
 
@@ -16,15 +15,14 @@ pub enum KnobEvent {
 }
 
 pub struct Knob {
-    value: Entity<f32>,
+    value: Entity<MixingComponentValue<f32>>,
     mouse_down_pos: Option<Point<Pixels>>,
 
     _subs: Vec<Subscription>,
 }
 
 impl Knob {
-    pub fn new(value: f32, cx: &mut Context<Self>) -> Self {
-        let value = cx.new(|_| value.clamp(0.0, 1.0));
+    pub fn new(value: Entity<MixingComponentValue<f32>>, cx: &mut Context<Self>) -> Self {
         let _subs = vec![cx.observe_and_notify(&value)];
 
         Self {
@@ -34,10 +32,6 @@ impl Knob {
         }
     }
 
-    pub fn value(&self) -> &Entity<f32> {
-        &self.value
-    }
-
     fn handle_left_mouse_down(
         &mut self,
         event: &gpui_kit::MouseDownEvent,
@@ -45,6 +39,7 @@ impl Knob {
         cx: &mut gpui_kit::prelude::Context<Self>,
     ) {
         self.mouse_down_pos = Some(event.position);
+        self.value.update(cx, |value, _| value.start_updating());
         cx.emit(KnobEvent::MouseDown);
     }
 
@@ -55,6 +50,7 @@ impl Knob {
         cx: &mut gpui_kit::prelude::Context<Self>,
     ) {
         self.mouse_down_pos = None;
+        self.value.update(cx, |value, _| value.stop_updating());
         cx.emit(KnobEvent::MouseUp);
     }
 }
@@ -65,7 +61,7 @@ impl Render for Knob {
         _window: &mut gpui_kit::Window,
         cx: &mut gpui_kit::prelude::Context<Self>,
     ) -> impl gpui_kit::prelude::IntoElement {
-        let value = self.value.read(cx);
+        let value = self.value.read(cx).display_value();
         let rotation = (value * 270.0) - 225.0;
 
         div()
@@ -106,12 +102,13 @@ impl Render for Knob {
                                                 * MOUSE_SENSITIVITY
                                                 * if is_fine { 0.1 } else { 1.0 };
 
-                                            let new_value = this.value.update(cx, |value, cx| {
-                                                let new_value =
-                                                    (*value - value_delta).clamp(0.0, 1.0);
-                                                *value = new_value;
-                                                cx.notify();
-                                                new_value
+                                            let new_value = this.value.update(cx, |mv, cx| {
+                                                mv.update_local_value(cx, |value, _| {
+                                                    let new_value =
+                                                        (*value - value_delta).clamp(0.0, 1.0);
+                                                    *value = new_value;
+                                                    new_value
+                                                })
                                             });
 
                                             this.mouse_down_pos = Some(event.position);
