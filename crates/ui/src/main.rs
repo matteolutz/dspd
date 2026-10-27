@@ -5,6 +5,7 @@ use gpui_kit::*;
 use itertools::Itertools;
 
 use crate::context::GpuiContextExtension;
+use crate::state::tab::UiTab;
 use crate::state::{EngineStats, Session, UiState};
 use crate::tabs::StripsTab;
 
@@ -22,7 +23,6 @@ struct HelloWorld {
     session: Entity<Session>,
 
     // Tabs
-    selected_tab: usize,
     strips_tab: Entity<tabs::StripsTab>,
 
     _subs: Vec<Subscription>,
@@ -47,7 +47,6 @@ impl HelloWorld {
             is_up,
             session,
 
-            selected_tab: 0,
             strips_tab,
 
             _subs,
@@ -57,6 +56,9 @@ impl HelloWorld {
 
 impl Render for HelloWorld {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let selected_tab = *UiState::tab_state(cx).read(cx);
+        let selected_tab_idx: usize = selected_tab.into();
+
         div()
             .flex()
             .flex_col()
@@ -83,46 +85,40 @@ impl Render for HelloWorld {
                             .flex()
                             .bg(cx.theme().secondary)
                             .overflow_hidden()
-                            .children(
-                                ["Strips", "Rack", "Patch", "Setup"]
-                                    .into_iter()
-                                    .enumerate()
-                                    .with_position()
-                                    .map(|(label_pos, (index, label))| {
-                                        let entity = cx.entity().downgrade();
-                                        Tab::new(index)
-                                            .flex_1()
-                                            .selected(self.selected_tab == index)
-                                            .h_full()
-                                            .flex()
-                                            .items_center()
-                                            .when_else(
-                                                self.selected_tab == index,
-                                                |this| {
-                                                    this.font_weight(gpui::FontWeight::BOLD)
-                                                        .bg(cx.theme().primary)
-                                                },
-                                                |this| {
-                                                    this.hover(|this| {
-                                                        this.bg(cx.theme().secondary_hover)
-                                                    })
-                                                },
-                                            )
-                                            .when(label_pos.is_first(), |this| {
-                                                this.rounded_l(cx.theme().radius)
-                                            })
-                                            .when(label_pos.is_last(), |this| {
-                                                this.rounded_r(cx.theme().radius)
-                                            })
-                                            .on_click(move |_, _, cx| {
-                                                _ = entity.update(cx, |this, cx| {
-                                                    this.selected_tab = index;
-                                                    cx.notify();
-                                                });
-                                            })
-                                            .child(label)
-                                    }),
-                            ),
+                            .children(UiTab::names().with_position().map(
+                                |(label_pos, (index, label))| {
+                                    Tab::new(index)
+                                        .flex_1()
+                                        .selected(selected_tab_idx == index)
+                                        .h_full()
+                                        .flex()
+                                        .items_center()
+                                        .when_else(
+                                            selected_tab_idx == index,
+                                            |this| {
+                                                this.font_weight(gpui::FontWeight::BOLD)
+                                                    .bg(cx.theme().primary)
+                                            },
+                                            |this| {
+                                                this.hover(|this| {
+                                                    this.bg(cx.theme().secondary_hover)
+                                                })
+                                            },
+                                        )
+                                        .when(label_pos.is_first(), |this| {
+                                            this.rounded_l(cx.theme().radius)
+                                        })
+                                        .when(label_pos.is_last(), |this| {
+                                            this.rounded_r(cx.theme().radius)
+                                        })
+                                        .on_click(move |_, _, cx| {
+                                            UiState::tab_state(cx).update(cx, |tab, cx| {
+                                                tab.select_tab_by_idx(index, cx)
+                                            });
+                                        })
+                                        .child(label)
+                                },
+                            )),
                     )
                     .child(
                         div()
@@ -154,8 +150,8 @@ impl Render for HelloWorld {
                             }),
                     ),
             )
-            .child(match self.selected_tab {
-                0 => self.strips_tab.clone().into_any_element(),
+            .child(match selected_tab {
+                UiTab::Strips { .. } => self.strips_tab.clone().into_any_element(),
                 _ => div()
                     .w_full()
                     .flex_1()

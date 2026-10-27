@@ -3,7 +3,7 @@ use gpui_kit::{
     ScrollHandle, StatefulInteractiveElement, Styled, Subscription,
 };
 
-use crate::{context::GpuiContextExtension, state::UiState};
+use crate::state::{StripSelectionEvent, UiState};
 
 mod actions {
     use gpui_kit::{App, KeyBinding};
@@ -46,8 +46,8 @@ impl StripsTab {
                 this.strips = Self::collect_strips(cx);
                 cx.notify();
             }),
-            cx.observe(&UiState::selected_strip(cx), |this, strip, cx| {
-                let Some(current_strip) = *strip.read(cx) else {
+            cx.subscribe(&UiState::strip_selection(cx), |this, _, evt, _| {
+                let StripSelectionEvent::StripChanged(Some(current_strip)) = *evt else {
                     return;
                 };
 
@@ -100,17 +100,18 @@ impl Render for StripsTab {
             .track_focus(&self.focus_handle)
             .key_context(actions::KEY_CONTEXT)
             .on_action(|action: &actions::ChangeStripBy, _, cx| {
-                UiState::selected_strip(cx).update(cx, |strip, cx| {
-                    let n_strips = UiState::strips(cx).count();
-                    let next_strip = strip
-                        .map(|s| {
-                            s.saturating_add_signed(action.by as isize)
-                                .min(n_strips.saturating_sub(1))
-                        })
-                        .unwrap_or(0);
+                UiState::strip_selection(cx).update(cx, |tab, cx| {
+                    tab.update_strip(cx, |strip, cx| {
+                        let n_strips = UiState::strips(cx).count();
+                        let next_strip = strip
+                            .map(|s| {
+                                s.saturating_add_signed(action.by as isize)
+                                    .min(n_strips.saturating_sub(1))
+                            })
+                            .unwrap_or(0);
 
-                    *strip = Some(next_strip);
-                    cx.notify();
+                        Some(next_strip)
+                    })
                 })
             })
             .w_full()

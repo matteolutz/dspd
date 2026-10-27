@@ -17,7 +17,7 @@ use crate::{
         mixing::{Knob, KnobEvent},
     },
     context::GpuiContextExtension,
-    state::{RequestBuilderExt, Strip, UiState},
+    state::{tab::UiTab, RequestBuilderExt, Strip, UiState},
 };
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
@@ -101,7 +101,7 @@ impl ChannelStrip {
 
         let _subs = vec![
             cx.observe_and_notify(strip),
-            cx.observe_and_notify(&UiState::selected_strip(cx)),
+            cx.observe_and_notify(&UiState::tab_state(cx)),
             cx.observe_and_notify(&UiState::meters(cx)),
             cx.subscribe(&knob, |this, _, evt: &KnobEvent, cx| match evt {
                 KnobEvent::ValueChanged(value) => {
@@ -159,17 +159,14 @@ impl Render for ChannelStrip {
         let strip = self.strip.read(cx);
         let strip_idx = strip.strip_idx;
 
-        let is_selected = UiState::selected_strip(cx)
+        let is_selected = UiState::strip_selection(cx)
             .read(cx)
-            .is_some_and(|idx| idx == strip_idx);
+            .is_strip_selected(strip_idx);
 
         div()
             .id("strip")
             .on_click(move |_, _, cx| {
-                UiState::selected_strip(cx).update(cx, |s, cx| {
-                    *s = Some(strip_idx);
-                    cx.notify();
-                })
+                UiState::strip_selection(cx).update(cx, |sel, cx| sel.select_strip(strip_idx, cx))
             })
             .flex_shrink_0()
             .w_24()
@@ -243,24 +240,35 @@ impl Render for ChannelStrip {
                     .flex_col()
                     .p_2()
                     .gap(rems(0.3))
-                    .children(strip.stages_without_io_meters(cx).map(|stage| {
-                        div()
-                            .bg(cx.theme().primary)
-                            .text_color(cx.theme().primary_foreground)
-                            .text_xs()
-                            .font_bold()
-                            .w_full()
-                            .h_8()
-                            .p_2()
-                            .rounded(cx.theme().radius * 0.5)
-                            .child(
-                                stage
-                                    .read(cx)
-                                    .name(cx)
-                                    .map(|name| name.to_string())
-                                    .unwrap_or_else(|| stage.read(cx).id_str().to_string()),
-                            )
-                    }))
+                    .children(strip.stages_without_io_meters(cx).enumerate().map(
+                        |(stage_idx, stage)| {
+                            div()
+                                .id(("stage", stage_idx))
+                                .on_click(move |_, _, cx| {
+                                    cx.stop_propagation();
+                                    UiState::strip_selection(cx).update(cx, |sel, cx| {
+                                        sel.select_strip_and_stage(strip_idx, stage_idx, cx)
+                                    });
+                                    UiState::tab_state(cx)
+                                        .update(cx, |tab, cx| tab.select_tab(UiTab::Rack, cx))
+                                })
+                                .bg(cx.theme().primary)
+                                .text_color(cx.theme().primary_foreground)
+                                .text_xs()
+                                .font_bold()
+                                .w_full()
+                                .h_8()
+                                .p_2()
+                                .rounded(cx.theme().radius * 0.5)
+                                .child(
+                                    stage
+                                        .read(cx)
+                                        .name(cx)
+                                        .map(|name| name.to_string())
+                                        .unwrap_or_else(|| stage.read(cx).id_str().to_string()),
+                                )
+                        },
+                    ))
                     .child(
                         Button::new("add-stage")
                             .secondary()

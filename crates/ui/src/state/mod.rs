@@ -17,9 +17,14 @@ mod registry;
 mod client;
 pub use client::*;
 
+mod selection;
+pub use selection::*;
+
+pub mod tab;
+
 use gpui_kit::{App, AppContext, Entity, Global, Subscription, Task, WeakEntity};
 
-use crate::state::registry::Registry;
+use crate::state::{registry::Registry, tab::UiTab};
 
 pub struct UiState {
     client: Arc<DspdHttpClient>,
@@ -29,7 +34,8 @@ pub struct UiState {
     registry: Entity<Registry>,
     session: Entity<Session>,
 
-    selected_strip: Entity<Option<usize>>,
+    tab_state: Entity<UiTab>,
+    strip_selection: Entity<StripSelection>,
 
     websocket: Entity<WebSocket>,
 
@@ -62,8 +68,12 @@ impl UiState {
         cx.global::<Self>().session.read(cx).strips.iter().cloned()
     }
 
-    pub fn selected_strip(cx: &App) -> Entity<Option<usize>> {
-        cx.global::<Self>().selected_strip.clone()
+    pub fn tab_state(cx: &App) -> Entity<UiTab> {
+        cx.global::<Self>().tab_state.clone()
+    }
+
+    pub fn strip_selection(cx: &App) -> Entity<StripSelection> {
+        cx.global::<Self>().strip_selection.clone()
     }
 
     pub fn strip_at(idx: usize, cx: &App) -> Option<Entity<Strip>> {
@@ -189,7 +199,8 @@ impl UiState {
 
         let (stats, stats_task) = EngineStats::start_fetching(&server_url, cx);
 
-        let selected_strip = cx.new(|_| None);
+        let tab_state = cx.new(|_| UiTab::default());
+        let strip_selection = cx.new(|_| StripSelection::default());
 
         let _tasks = vec![stats_task];
         let _subs = vec![websocket_evt_sub];
@@ -201,7 +212,8 @@ impl UiState {
             registry,
             session,
             websocket,
-            selected_strip,
+            tab_state,
+            strip_selection,
             _tasks,
             _subs,
         };
