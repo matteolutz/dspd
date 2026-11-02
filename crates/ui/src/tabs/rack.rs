@@ -12,7 +12,7 @@ use gpui_kit::{
 };
 
 use crate::{
-    components::{ChannelStripColor, GenericStageEditor},
+    components::{ChannelStripColor, DynEqEditor, GenericStageEditor},
     context::GpuiContextExtension,
     state::{Stage, StripSelectionEvent, UiState},
     tabs::utils::{self, select_stage},
@@ -54,10 +54,13 @@ const MAX_PLUGINS: usize = 8;
 struct RackStage {
     stage: Entity<Stage>,
     editor: AnyView,
+    generic_editor: Entity<GenericStageEditor>,
 }
 
 pub struct RackTab {
     stages: [Option<RackStage>; MAX_PLUGINS],
+
+    use_generic_editor: bool,
 
     _subs: Vec<Subscription>,
     focus_handle: FocusHandle,
@@ -84,6 +87,7 @@ impl RackTab {
         Self {
             stages,
             _subs,
+            use_generic_editor: false,
             focus_handle: cx.focus_handle(),
         }
     }
@@ -109,8 +113,23 @@ impl RackTab {
 
         stages.map(|s| {
             s.map(|s| {
-                let editor: AnyView = cx.new(|cx| GenericStageEditor::new(&s, cx)).into();
-                RackStage { editor, stage: s }
+                let editor: AnyView = match s.read(cx).id_str().to_string().as_str() {
+                    "dyn_eq" => cx.new(|cx| DynEqEditor::new(&s, cx)).into(),
+                    _ => cx.new(|cx| GenericStageEditor::new(&s, cx)).into(),
+                };
+
+                let generic_editor: Entity<GenericStageEditor> =
+                    if let Ok(editor) = editor.clone().downcast::<GenericStageEditor>() {
+                        editor.into()
+                    } else {
+                        cx.new(|cx| GenericStageEditor::new(&s, cx)).into()
+                    };
+
+                RackStage {
+                    editor,
+                    generic_editor,
+                    stage: s,
+                }
             })
         })
     }
@@ -273,12 +292,39 @@ impl Render for RackTab {
                             .bg(cx.theme().border)
                             .p_24()
                             .flex()
+                            .flex_col()
                             .justify_center()
                             .items_center()
                             .overflow_hidden()
-                            .when_some(selected_stage, |this, RackStage { editor, .. }| {
-                                this.child(editor.clone())
-                            }),
+                            .when_some(
+                                selected_stage,
+                                |this,
+                                 RackStage {
+                                     editor,
+                                     generic_editor,
+                                     ..
+                                 }| {
+                                    this.child(
+                                        Button::new("use-generic-editor")
+                                            .label(if self.use_generic_editor {
+                                                "Plugin Editor"
+                                            } else {
+                                                "Generic Editor"
+                                            })
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.use_generic_editor = !this.use_generic_editor;
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        if self.use_generic_editor {
+                                            generic_editor.clone().into_any_element()
+                                        } else {
+                                            editor.clone().into_any_element()
+                                        },
+                                    )
+                                },
+                            ),
                     )
                     .child(div().h_full().w_56()),
             )
