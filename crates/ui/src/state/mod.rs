@@ -123,7 +123,7 @@ impl UiState {
 
     pub fn init(server_url: impl reqwest::IntoUrl, cx: &mut App) {
         let server_url = server_url.into_url().expect("Failed to parse server URL");
-        let client = DspdHttpClient::new(server_url.clone());
+        let client = Arc::new(DspdHttpClient::new(server_url.clone()));
 
         let meters = cx.new(|_| MetersState::default());
         let registry = cx.new(|_| Self::get_registry(&client));
@@ -196,7 +196,7 @@ impl UiState {
             }
         });
 
-        let (stats, stats_task) = EngineStats::start_fetching(&server_url, cx);
+        let (stats, stats_task) = EngineStats::start_fetching(client.clone(), cx);
 
         let tab_state = cx.new(|_| UiTab::default());
         let strip_selection = cx.new(|_| StripSelection::default());
@@ -205,7 +205,7 @@ impl UiState {
         let _subs = vec![websocket_evt_sub];
 
         let this = Self {
-            client: Arc::new(client),
+            client,
             meters,
             stats,
             registry,

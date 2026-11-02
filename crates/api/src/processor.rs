@@ -1,11 +1,24 @@
 use crate::{block::AudioBlock, MeterWriter};
 
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+pub enum MeterType {
+    /// A value with 0dB at 1.0, e.g. an output level meter.
+    #[default]
+    Level,
+
+    /// A value with 0dB at 0.0, e.g. a gain reduction meter.
+    GainReduction,
+}
+
 /// One value a processor publishes for display (a meter, gain reduction, ...).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MeterSpec {
     /// Stable id of the value inside this processor (the CLAP parameter id for CLAP plugins).
     pub param_id: u32,
     pub name: String,
+    pub r#type: MeterType,
 }
 
 /// One audio-processing unit (a plugin, a built-in effect, a whole chain).

@@ -16,6 +16,21 @@
 
 use crate::processor::BoxedProcessor;
 
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+pub enum ParamUnit {
+    #[default]
+    Linear,
+    Decibels,
+    Percent,
+
+    Seconds,
+    Milliseconds,
+
+    Hertz,
+}
+
 /// One settable parameter of a native plugin.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ParamDef {
@@ -29,6 +44,7 @@ pub struct ParamDef {
     pub min: f64,
     pub max: f64,
     pub default: f64,
+    pub unit: ParamUnit,
 }
 
 /// What a plugin may need to know when it is created.

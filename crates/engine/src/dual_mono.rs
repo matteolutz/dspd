@@ -81,6 +81,7 @@ impl Processor for DualMono {
                 .map(|s| MeterSpec {
                     param_id: s.param_id,
                     name: format!("{} {tag}", s.name),
+                    r#type: s.r#type,
                 })
                 .collect()
         };

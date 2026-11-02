@@ -94,13 +94,19 @@ impl Render for Knob {
             .id("knob")
             .on_double_click(cx.listener(|this, _, _, cx| {
                 if let Some(handler) = this.on_double_click.as_ref() {
-                    this.value.update(cx, |value, cx| {
+                    let new_value = this.value.update(cx, |value, cx| {
                         value.start_updating();
-                        value.update_local_value(cx, |local, _| {
+                        let new_value = value.update_local_value(cx, |local, _| {
                             handler(local);
+                            *local
                         });
                         value.stop_updating();
-                    })
+
+                        new_value
+                    });
+
+                    cx.emit(KnobEvent::ValueChanged(new_value));
+                    cx.notify();
                 }
             }))
             .flex_shrink_0()

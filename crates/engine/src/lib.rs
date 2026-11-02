@@ -27,6 +27,7 @@ pub use registry::Registry;
 pub use session::SessionSpec;
 
 pub use dspd_api::{
-    AudioBlock, BoxedProcessor, ClapSpec, MeterBank, MeterInfo, MeterSpec, MeterWriter, NativeSpec,
-    ParamDef, PluginContext, PluginDescriptor, Processor, StageSpec, StripSpec, Width,
+    AudioBlock, BoxedProcessor, ClapSpec, MeterBank, MeterInfo, MeterSpec, MeterType, MeterWriter,
+    NativeSpec, ParamDef, ParamUnit, PluginContext, PluginDescriptor, Processor, StageSpec,
+    StripSpec, Width,
 };

@@ -156,6 +156,7 @@ impl Rack {
                         stage: chain_stage_order[stage_idx],
                         param_id: spec.param_id,
                         name: spec.name,
+                        r#type: spec.r#type,
                     });
                 }
             }

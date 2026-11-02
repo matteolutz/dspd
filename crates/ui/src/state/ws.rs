@@ -1,7 +1,7 @@
 use async_tungstenite::{smol::connect_async, tungstenite::Message};
 use dspd_api::{MeterInfo, StageSpec};
 use futures_util::StreamExt;
-use gpui_kit::{private::serde, App, AppContext, Context, Entity, EventEmitter, Task};
+use gpui_kit::{private::serde, AppContext, Context, Entity, EventEmitter, Task};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -230,9 +230,5 @@ impl WebSocket {
             is_connected,
             _task,
         }
-    }
-
-    pub fn is_connected(&self, cx: &App) -> bool {
-        *self.is_connected.read(cx)
     }
 }

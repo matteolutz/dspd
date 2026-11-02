@@ -1,5 +1,5 @@
 use gpui_kit::base::{Tab, Tabs};
-use gpui_kit::component::{green_500, ActiveTheme};
+use gpui_kit::component::{green_500, red_500, ActiveTheme};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use itertools::Itertools;
@@ -73,6 +73,7 @@ impl Render for HelloWorld {
                     .flex()
                     .w_full()
                     .h_20()
+                    .flex_shrink_0()
                     .py_2()
                     .px_8()
                     .border_b_1()
@@ -140,17 +141,24 @@ impl Render for HelloWorld {
                                     )),
                                 ),
                             )
-                            .when(*self.is_up.read(cx), |this| {
-                                this.child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_1()
-                                        .text_color(green_500())
-                                        .child(div().rounded_full().size_2().bg(green_500()))
-                                        .child("SYNC"),
-                                )
-                            }),
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .child(div().rounded_full().size_2().bg(
+                                        if *self.is_up.read(cx) {
+                                            green_500()
+                                        } else {
+                                            red_500()
+                                        },
+                                    ))
+                                    .when_else(
+                                        *self.is_up.read(cx),
+                                        |this| this.text_color(green_500()).child("SYNC"),
+                                        |this| this.text_color(red_500()).child("NO SYNC"),
+                                    ),
+                            ),
                     ),
             )
             .child(match selected_tab {
@@ -170,6 +178,7 @@ impl Render for HelloWorld {
                 div()
                     .w_full()
                     .h_10()
+                    .flex_shrink_0()
                     .border_t_1()
                     .border_color(cx.theme().border)
                     .bg(cx.theme().title_bar)

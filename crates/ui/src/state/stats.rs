@@ -1,6 +1,8 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use gpui_kit::{App, AppContext, Entity, Task};
+
+use crate::state::DspdHttpClient;
 
 #[derive(Clone, Debug, Default, serde::Deserialize)]
 pub struct EngineStats {
@@ -15,21 +17,21 @@ pub struct EngineStats {
 
 impl EngineStats {
     pub(super) fn start_fetching(
-        server_url: &reqwest::Url,
+        client: Arc<DspdHttpClient>,
         cx: &mut App,
     ) -> (Entity<Self>, Task<()>) {
         let stats_entity = cx.new(|_| Self::default());
-        let stats_url = server_url.join("/stats").expect("Failed to join URL");
 
         let task = cx.spawn({
             let stats_entity = stats_entity.clone();
 
             async move |cx| loop {
-                let stats_url = stats_url.clone();
+                let client = client.clone();
 
                 let body: reqwest::Result<String> = cx
                     .background_spawn(async move {
-                        reqwest::blocking::get(stats_url).and_then(|res| res.text())
+                        // reqwest::blocking::get(stats_url).and_then(|res| res.text())
+                        client.get("/stats").send().and_then(|res| res.text())
                     })
                     .await;
 

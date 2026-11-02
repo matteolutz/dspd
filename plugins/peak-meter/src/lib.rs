@@ -70,6 +70,7 @@ impl Processor for PeakMeter {
             .map(|channel| MeterSpec {
                 param_id: channel as u32,
                 name: format!("Peak {}", channel + 1),
+                r#type: dspd_api::MeterType::Level,
             })
             .collect()
     }

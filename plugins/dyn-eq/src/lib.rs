@@ -1,4 +1,4 @@
-use dspd_api::{AudioBlock, MeterSpec, MeterWriter, OptionalMeterWriter, Processor};
+use dspd_api::{AudioBlock, MeterSpec, MeterType, MeterWriter, OptionalMeterWriter, Processor};
 
 use crate::band::DynamicBand;
 
@@ -127,6 +127,7 @@ impl Processor for DynamicEq {
             .map(|band| MeterSpec {
                 param_id: band as u32,
                 name: format!("Band {} Gain Reduction (dB)", band + 1),
+                r#type: MeterType::GainReduction,
             })
             .collect()
     }

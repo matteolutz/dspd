@@ -333,6 +333,7 @@ impl Editor {
                     stage: id,
                     param_id: m.param_id,
                     name: m.name,
+                    r#type: m.r#type,
                 });
             }
         }
@@ -512,7 +513,7 @@ impl Editor {
 mod tests {
     use super::*;
     use crate::{edit_channel, param_channel, AudioBlock, Engine, ParamEvent, Processor};
-    use dspd_api::{ParamDef, PluginDescriptor};
+    use dspd_api::{ParamDef, ParamUnit, PluginDescriptor};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // ---- small test plugins -------------------------------------------
@@ -550,6 +551,7 @@ mod tests {
                 min: -10.0,
                 max: 10.0,
                 default: 0.0,
+                unit: ParamUnit::default(),
             }]
             .to_vec(),
             create: Box::new(|_| Box::new(Add(0.0))),
@@ -605,6 +607,7 @@ mod tests {
                 min: 0.0,
                 max: 4800.0,
                 default: 0.0,
+                unit: ParamUnit::default(),
             }]
             .to_vec(),
             create: Box::new(|ctx| {

@@ -14,6 +14,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::MeterType;
+
 /// Fixed-size array of atomic `f32` values, shared between threads in an `Arc`.
 pub struct MeterBank {
     values: Box<[AtomicU32]>,
@@ -135,6 +137,7 @@ pub struct MeterInfo {
     /// The CLAP parameter id for CLAP plugins; for native processors, whatever id they declared.
     pub param_id: u32,
     pub name: String,
+    pub r#type: MeterType,
 }
 
 #[cfg(test)]

@@ -7,13 +7,12 @@ use gpui_kit::{
     },
     div,
     prelude::FluentBuilder,
-    AnyElement, AnyEntity, AnyView, App, AppContext, Context, Entity, FocusHandle,
-    InteractiveElement, IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled,
-    Subscription,
+    AnyView, App, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
+    ParentElement, Render, StatefulInteractiveElement, Styled, Subscription,
 };
 
 use crate::{
-    components::{ChannelStripColor, GenericStageEditor, StageListItem},
+    components::{ChannelStripColor, GenericStageEditor},
     context::GpuiContextExtension,
     state::{Stage, StripSelectionEvent, UiState},
     tabs::utils::{self, select_stage},
@@ -129,7 +128,14 @@ impl Render for RackTab {
             .selected_strip()
             .and_then(|s| UiState::strip_at(s, cx))
         else {
-            return div().into_any_element();
+            return div()
+                .size_full()
+                .flex()
+                .justify_center()
+                .items_center()
+                .text_color(cx.theme().muted_foreground)
+                .child("Please select a channel strip to view its rack")
+                .into_any_element();
         };
 
         let selected_stage_idx = strip_selection.selected_stage();
@@ -147,12 +153,14 @@ impl Render for RackTab {
             })
             .w_full()
             .flex_1()
+            .overflow_hidden()
             .flex()
             .flex_col()
             .child(
                 div() // title bar
                     .w_full()
                     .h_12()
+                    .flex_shrink_0()
                     .bg(cx.theme().title_bar)
                     .border_b_1()
                     .border_color(cx.theme().border)
@@ -208,6 +216,7 @@ impl Render for RackTab {
             .child(
                 div() // main area
                     .flex_1()
+                    .overflow_hidden()
                     .w_full()
                     .flex()
                     .child(
@@ -266,6 +275,7 @@ impl Render for RackTab {
                             .flex()
                             .justify_center()
                             .items_center()
+                            .overflow_hidden()
                             .when_some(selected_stage, |this, RackStage { editor, .. }| {
                                 this.child(editor.clone())
                             }),

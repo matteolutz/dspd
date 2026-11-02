@@ -1,4 +1,22 @@
+use dspd_api::ParamUnit;
 use std::collections::BTreeMap;
+
+pub trait ParamUnitToString {
+    fn as_str(&self) -> &'static str;
+}
+
+impl ParamUnitToString for ParamUnit {
+    fn as_str(&self) -> &'static str {
+        match self {
+            ParamUnit::Linear => "",
+            ParamUnit::Decibels => "dB",
+            ParamUnit::Percent => "%",
+            ParamUnit::Seconds => "s",
+            ParamUnit::Milliseconds => "ms",
+            ParamUnit::Hertz => "Hz",
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, serde::Deserialize)]
 pub struct ParamDef {
@@ -11,6 +29,7 @@ pub struct ParamDef {
     pub min: f64,
     pub max: f64,
     pub default: f64,
+    pub unit: ParamUnit,
 }
 
 /// Everything the host needs to list and instantiate a native plugin.

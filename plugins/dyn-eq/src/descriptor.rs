@@ -1,4 +1,4 @@
-use dspd_api::{ParamDef, PluginDescriptor};
+use dspd_api::{ParamDef, ParamUnit, PluginDescriptor};
 
 pub const BAND_COUNT: usize = 6;
 pub const PARAMS_PER_BAND: u32 = 8;
@@ -16,6 +16,7 @@ macro_rules! all_band_params {
                     min: 20.0,
                     max: 20_000.0,
                     default: 1000.0,
+                    unit: ParamUnit::Hertz
                 },
                 ParamDef {
                     id: (($band - 1) * PARAMS_PER_BAND) + 1,
@@ -24,6 +25,7 @@ macro_rules! all_band_params {
                     min: 0.1,
                     max: 18.0,
                     default: 1.0,
+                    unit: ParamUnit::Linear
                 },
                 ParamDef {
                     id: (($band - 1) * PARAMS_PER_BAND) + 2,
@@ -32,6 +34,7 @@ macro_rules! all_band_params {
                     min: -24.0,
                     max: 24.0,
                     default: 0.0,
+                    unit: ParamUnit::Decibels
                 },
                 ParamDef {
                     id: (($band - 1) * PARAMS_PER_BAND) + 3,
@@ -40,6 +43,7 @@ macro_rules! all_band_params {
                     min: -90.0,
                     max: 0.0,
                     default: 0.0,
+                    unit: ParamUnit::Decibels
                 },
                 ParamDef {
                     id: (($band - 1) * PARAMS_PER_BAND) + 4,
@@ -48,6 +52,7 @@ macro_rules! all_band_params {
                     min: 1.0,
                     max: 20.0,
                     default: 1.0,
+                    unit: ParamUnit::Linear
                 },
                 ParamDef {
                     id: (($band - 1) * PARAMS_PER_BAND) + 5,
@@ -56,6 +61,7 @@ macro_rules! all_band_params {
                     min: -24.0,
                     max: 24.0,
                     default: 0.0,
+                    unit: ParamUnit::Decibels
                 },
                 ParamDef {
                     id: (($band - 1) * PARAMS_PER_BAND) + 6,
@@ -64,6 +70,7 @@ macro_rules! all_band_params {
                     min: 0.1,
                     max: 500.0,
                     default: 30.0,
+                    unit: ParamUnit::Milliseconds
                 },
                 ParamDef {
                     id: (($band - 1) * PARAMS_PER_BAND) + 7,
@@ -72,6 +79,7 @@ macro_rules! all_band_params {
                     min: 0.1,
                     max: 2000.0,
                     default: 100.0,
+                    unit: ParamUnit::Milliseconds
                 },
             )*
         ]

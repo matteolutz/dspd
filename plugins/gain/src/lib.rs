@@ -15,6 +15,7 @@ pub fn descriptor() -> PluginDescriptor {
             min: -120.0,
             max: 24.0,
             default: 0.0,
+            unit: dspd_api::ParamUnit::Decibels,
         }]
         .to_vec(),
         create: Box::new(|_ctx| Box::new(Gain::new(0.0))),

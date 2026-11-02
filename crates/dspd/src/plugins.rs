@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use dspd_engine::{DualMono, ParamDef, PluginDescriptor, Processor, Registry};
+use dspd_engine::{DualMono, ParamDef, ParamUnit, PluginDescriptor, Processor, Registry};
 use dspd_host_clap::{inspect, ClapProcessor};
 
 pub trait ClapIntoPluginDescriptor {
@@ -34,6 +34,7 @@ impl ClapIntoPluginDescriptor for dspd_host_clap::PluginInfo {
                     default: p.default,
                     min: p.min,
                     max: p.max,
+                    unit: ParamUnit::default(),
                 })
                 .collect::<Vec<_>>(),
             create: Box::new(move |ctx| {

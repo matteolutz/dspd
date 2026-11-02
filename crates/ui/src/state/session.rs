@@ -1,7 +1,7 @@
-use dspd_api::StageSpec;
+use dspd_api::{MeterType, StageSpec};
 use gpui_kit::{App, AppContext, Context, Entity, SharedString, WeakEntity};
 
-use crate::state::{registry::Registry, MetersState, ParamDef, PluginDescriptor, UiState};
+use crate::state::{registry::Registry, MetersState, PluginDescriptor, UiState};
 
 #[derive(serde::Deserialize)]
 pub struct SerializableSession {
@@ -172,7 +172,7 @@ impl Strip {
         Some(
             first_stage
                 .get_meters(cx)
-                .map(|(_, _, meter_value)| meter_value.unwrap_or(0.0)),
+                .map(|(_, _, _, _, meter_value)| meter_value.unwrap_or(0.0)),
         )
     }
 
@@ -189,7 +189,7 @@ impl Strip {
         Some(
             last_stage
                 .get_meters(cx)
-                .map(|(_, _, meter_value)| meter_value.unwrap_or(0.0)),
+                .map(|(_, _, _, _, meter_value)| meter_value.unwrap_or(0.0)),
         )
     }
 
@@ -403,7 +403,7 @@ impl Stage {
     pub fn get_meters<'a>(
         &self,
         cx: &'a App,
-    ) -> impl Iterator<Item = (u32, &'a String, Option<f32>)> {
+    ) -> impl Iterator<Item = (usize, u32, &'a String, MeterType, Option<f32>)> {
         self.meters
             .upgrade()
             .expect("MetersState entity has been dropped")

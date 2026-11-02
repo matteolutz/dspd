@@ -115,6 +115,7 @@ mod tests {
             min: 0.0,
             max: 1.0,
             default: 0.0,
+            unit: dspd_api::ParamUnit::default(),
         };
 
         let mut r = Registry::new();

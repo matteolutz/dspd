@@ -1,13 +1,20 @@
+use dspd_api::MeterType;
 use gpui_kit::{
-    component::ActiveTheme, div, AppContext, Context, Entity, IntoElement, ParentElement, Render,
-    SharedString, Styled, Subscription,
+    component::{scroll::ScrollableElement, ActiveTheme},
+    div,
+    prelude::FluentBuilder,
+    AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled,
+    Subscription,
 };
 use serde_json::json;
 
 use crate::{
-    components::mixing::{Knob, KnobEvent, MixingComponentValue},
+    components::{
+        meters::{LevelMeter, LevelMeterMode},
+        mixing::{Knob, KnobEvent, MixingComponentValue},
+    },
     context::GpuiContextExtension,
-    state::{RequestBuilderExt, Stage, UiState},
+    state::{MetersStateContextExt, ParamUnitToString, RequestBuilderExt, Stage, UiState},
     utils::map_range,
 };
 
@@ -17,18 +24,42 @@ struct GenericStageKnob {
     _subs: Vec<Subscription>,
 }
 
+struct GenericStageMeter {
+    name: SharedString,
+    r#type: MeterType,
+    slot: usize,
+}
+
 pub struct GenericStageEditor {
     stage: Entity<Stage>,
+
     knobs: Vec<GenericStageKnob>,
+    meters: Vec<GenericStageMeter>,
+
+    _subs: Vec<Subscription>,
 }
 
 impl GenericStageEditor {
     pub fn new(stage: &Entity<Stage>, cx: &mut Context<Self>) -> Self {
         let knobs = Self::make_knobs(stage, cx);
+        let meters = stage
+            .read(cx)
+            .get_meters(cx)
+            .map(|(slot, _, name, r#type, _)| GenericStageMeter {
+                name: name.into(),
+                slot,
+                r#type,
+            })
+            .collect::<Vec<_>>();
+
+        let _subs =
+            vec![cx.subscribe_meter_values(meters.iter().map(|m| m.slot), |_, cx| cx.notify())];
 
         Self {
             stage: stage.clone(),
             knobs,
+            meters,
+            _subs,
         }
     }
 
@@ -73,7 +104,7 @@ impl GenericStageEditor {
                         .with_value_formatter(move |val| {
                             let mapped =
                                 map_range(val, 0.0, 1.0, param.min as f32, param.max as f32);
-                            format!("{:.1}", mapped)
+                            format!("{:.1}{}", mapped, param.unit.as_str())
                         })
                 });
 
@@ -122,7 +153,7 @@ impl GenericStageEditor {
 impl Render for GenericStageEditor {
     fn render(
         &mut self,
-        window: &mut gpui_kit::Window,
+        _window: &mut gpui_kit::Window,
         cx: &mut gpui_kit::prelude::Context<Self>,
     ) -> impl gpui_kit::prelude::IntoElement {
         let Some(_descriptor) = self.stage.read(cx).descriptor(cx) else {
@@ -149,23 +180,51 @@ impl Render for GenericStageEditor {
             .flex()
             .flex_col()
             .p_2()
-            .child(
-                div() // meters
-                    .w_full()
-                    .flex_1()
-                    .py_2()
-                    .border_b_2()
-                    .border_color(cx.theme().border)
-                    .child("Meters"),
-            )
+            .when(!self.meters.is_empty(), |this| {
+                this.child(
+                    div() // meters
+                        .w_full()
+                        .flex_1()
+                        .py_2()
+                        .border_b_2()
+                        .border_color(cx.theme().border)
+                        .flex()
+                        .justify_between()
+                        .gap_1()
+                        .children(self.meters.iter().map(|m| {
+                            let value = UiState::meters(cx)
+                                .read(cx)
+                                .meter_value(m.slot)
+                                .unwrap_or(0.0);
+
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .gap_0p5()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(LevelMeter::new([value]).with_mode(match m.r#type {
+                                    MeterType::Level => LevelMeterMode::Gain,
+                                    MeterType::GainReduction => LevelMeterMode::GainReduction,
+                                }))
+                                .child(m.name.clone())
+                        })),
+                )
+            })
             .child(
                 div() // knobs
-                    .h_2_3()
+                    .when_else(
+                        self.meters.is_empty(),
+                        |this| this.h_full(),
+                        |this| this.h_2_3(),
+                    )
                     .w_full()
                     .py_2()
                     .flex()
                     .justify_center()
                     .items_center()
+                    .overflow_y_scrollbar()
                     .child(
                         div()
                             .grid()

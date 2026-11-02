@@ -1,6 +1,6 @@
 use std::{collections::HashSet, ops::Deref};
 
-use dspd_api::MeterInfo;
+use dspd_api::{MeterInfo, MeterType};
 use gpui_kit::{Context, EventEmitter, Subscription};
 
 use crate::state::UiState;
@@ -69,14 +69,18 @@ impl MetersState {
         &self,
         strip_idx: usize,
         stage_id: u32,
-    ) -> impl Iterator<Item = (u32, &String, Option<f32>)> {
+    ) -> impl Iterator<Item = (usize, u32, &String, MeterType, Option<f32>)> {
         self.meters.iter().filter_map(move |m| {
             if m.strip == strip_idx && m.stage == stage_id {
-                Some((m.param_id, &m.name, m.value))
+                Some((m.slot, m.param_id, &m.name, m.r#type, m.value))
             } else {
                 None
             }
         })
+    }
+
+    pub(crate) fn meter_value(&self, slot: usize) -> Option<f32> {
+        self.meters.get(slot).and_then(|m| m.value)
     }
 }
 

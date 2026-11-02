@@ -12,7 +12,7 @@ use clap_sys::events::{
 };
 use clap_sys::ext::latency::{clap_plugin_latency, CLAP_EXT_LATENCY};
 use clap_sys::process::{clap_process, CLAP_PROCESS_ERROR};
-use dspd_engine::{AudioBlock, MeterSpec, MeterWriter, Processor};
+use dspd_engine::{AudioBlock, MeterSpec, MeterType, MeterWriter, Processor};
 
 use crate::entry::{read_cstr, Entry, PluginHandle};
 use crate::inspect::list_params;
@@ -359,6 +359,7 @@ impl Processor for ClapProcessor {
             .map(|(&param_id, name)| MeterSpec {
                 param_id,
                 name: name.clone(),
+                r#type: MeterType::default(),
             })
             .collect()
     }
