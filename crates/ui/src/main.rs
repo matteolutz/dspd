@@ -14,6 +14,7 @@ mod hsla;
 mod state;
 mod tabs;
 mod theme;
+mod utils;
 
 struct HelloWorld {
     stats: Entity<EngineStats>,
@@ -181,8 +182,9 @@ impl Render for HelloWorld {
                     .text_color(cx.theme().muted_foreground)
                     .child(div())
                     .child(format!(
-                        "{} strips · ?? plugins",
-                        self.session.read(cx).strips().count()
+                        "{} strips · {} plugins",
+                        self.session.read(cx).strips().count(),
+                        self.session.read(cx).total_stages(cx)
                     )),
             )
     }

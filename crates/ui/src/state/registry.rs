@@ -14,7 +14,7 @@ pub struct ParamDef {
 }
 
 /// Everything the host needs to list and instantiate a native plugin.
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct PluginDescriptor {
     pub id: String,
     pub name: String,

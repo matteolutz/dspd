@@ -1,7 +1,7 @@
 use dspd_api::StageSpec;
 use gpui_kit::{App, AppContext, Context, Entity, SharedString, WeakEntity};
 
-use crate::state::{registry::Registry, MetersState};
+use crate::state::{registry::Registry, MetersState, ParamDef, PluginDescriptor, UiState};
 
 #[derive(serde::Deserialize)]
 pub struct SerializableSession {
@@ -113,6 +113,13 @@ impl Session {
 
     pub fn strips(&self) -> impl Iterator<Item = &Entity<Strip>> {
         self.strips.iter()
+    }
+
+    pub fn total_stages(&self, cx: &App) -> usize {
+        self.strips
+            .iter()
+            .map(|s| s.read(cx).stages_without_io_meters(cx).count())
+            .sum()
     }
 }
 
@@ -353,6 +360,14 @@ pub struct Stage {
 }
 
 impl Stage {
+    pub fn strip_idx(&self) -> usize {
+        self.strip_idx
+    }
+
+    pub fn stage_id(&self) -> u32 {
+        self.stage_id
+    }
+
     pub fn id_str(&self) -> &str {
         match &self.spec {
             dspd_api::StageSpec::Native(native_spec) => native_spec.plugin.as_str(),
@@ -373,6 +388,10 @@ impl Stage {
                     .map(|desc| desc.name.as_str())
             }
         }
+    }
+
+    pub fn name_or_id<'a>(&'a self, cx: &'a App) -> &'a str {
+        self.name(cx).unwrap_or_else(|| self.id_str())
     }
 
     pub fn is_native_plugin(&self, plugin_name: &str) -> bool {
@@ -408,6 +427,10 @@ impl Stage {
         }
 
         cx.notify();
+    }
+
+    pub fn descriptor<'a>(&'a self, cx: &'a App) -> Option<&'a PluginDescriptor> {
+        UiState::registry(cx).read(cx).get_plugin(self.id_str())
     }
 }
 

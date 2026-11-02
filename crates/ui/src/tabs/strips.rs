@@ -3,7 +3,10 @@ use gpui_kit::{
     ScrollHandle, StatefulInteractiveElement, Styled, Subscription,
 };
 
-use crate::state::{StripSelectionEvent, UiState};
+use crate::{
+    state::{StripSelectionEvent, UiState},
+    tabs::utils,
+};
 
 mod actions {
     use gpui_kit::{App, KeyBinding};
@@ -100,19 +103,7 @@ impl Render for StripsTab {
             .track_focus(&self.focus_handle)
             .key_context(actions::KEY_CONTEXT)
             .on_action(|action: &actions::ChangeStripBy, _, cx| {
-                UiState::strip_selection(cx).update(cx, |tab, cx| {
-                    tab.update_strip(cx, |strip, cx| {
-                        let n_strips = UiState::strips(cx).count();
-                        let next_strip = strip
-                            .map(|s| {
-                                s.saturating_add_signed(action.by as isize)
-                                    .min(n_strips.saturating_sub(1))
-                            })
-                            .unwrap_or(0);
-
-                        Some(next_strip)
-                    })
-                })
+                utils::change_strip_by(action.by, cx)
             })
             .w_full()
             .flex_1()

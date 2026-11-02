@@ -17,6 +17,9 @@
           "0": -3.0
         },
         {
+          "type": "dyn_eq"
+        },
+        {
           "type": "peak_meter"
         }
       ]

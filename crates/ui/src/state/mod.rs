@@ -13,6 +13,7 @@ mod meters;
 pub use meters::*;
 
 mod registry;
+pub use registry::*;
 
 mod client;
 pub use client::*;

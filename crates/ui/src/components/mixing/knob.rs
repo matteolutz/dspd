@@ -1,7 +1,13 @@
+use std::rc::Rc;
+
 use gpui_kit::{
-    canvas, component::ActiveTheme, div, px, AppContext, Context, DispatchPhase, Entity,
-    EventEmitter, InteractiveElement, MouseMoveEvent, ParentElement, PathBuilder, Pixels, Point,
-    Render, Styled, Subscription,
+    base::{InteractiveElementExt, Popup},
+    canvas,
+    component::ActiveTheme,
+    div,
+    prelude::FluentBuilder,
+    px, Anchor, Context, DispatchPhase, Entity, EventEmitter, InteractiveElement, MouseMoveEvent,
+    ParentElement, PathBuilder, Pixels, Point, Render, Styled, Subscription,
 };
 
 use crate::{components::mixing::MixingComponentValue, context::GpuiContextExtension};
@@ -18,6 +24,9 @@ pub struct Knob {
     value: Entity<MixingComponentValue<f32>>,
     mouse_down_pos: Option<Point<Pixels>>,
 
+    on_double_click: Option<Rc<dyn Fn(&mut f32)>>,
+    value_formatter: Option<Rc<dyn Fn(f32) -> String>>,
+
     _subs: Vec<Subscription>,
 }
 
@@ -28,10 +37,27 @@ impl Knob {
         Self {
             value,
             mouse_down_pos: None,
+            on_double_click: None,
+            value_formatter: None,
             _subs,
         }
     }
 
+    pub fn on_double_click<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut f32) + 'static,
+    {
+        self.on_double_click = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn with_value_formatter<F>(mut self, formatter: F) -> Self
+    where
+        F: Fn(f32) -> String + 'static,
+    {
+        self.value_formatter = Some(Rc::new(formatter));
+        self
+    }
     fn handle_left_mouse_down(
         &mut self,
         event: &gpui_kit::MouseDownEvent,
@@ -58,13 +84,25 @@ impl Knob {
 impl Render for Knob {
     fn render(
         &mut self,
-        _window: &mut gpui_kit::Window,
+        window: &mut gpui_kit::Window,
         cx: &mut gpui_kit::prelude::Context<Self>,
     ) -> impl gpui_kit::prelude::IntoElement {
         let value = self.value.read(cx).display_value();
         let rotation = (value * 270.0) - 225.0;
 
         div()
+            .id("knob")
+            .on_double_click(cx.listener(|this, _, _, cx| {
+                if let Some(handler) = this.on_double_click.as_ref() {
+                    this.value.update(cx, |value, cx| {
+                        value.start_updating();
+                        value.update_local_value(cx, |local, _| {
+                            handler(local);
+                        });
+                        value.stop_updating();
+                    })
+                }
+            }))
             .flex_shrink_0()
             .size_11()
             .rounded_full()
@@ -72,6 +110,32 @@ impl Render for Knob {
             .flex()
             .justify_center()
             .items_center()
+            .relative()
+            .child(
+                Popup::new("knob-value", div().w_full())
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .anchor(Anchor::TopCenter)
+                    .offset(-2.25 * window.rem_size())
+                    .when(self.mouse_down_pos.is_some(), |this| {
+                        this.content(
+                            div()
+                                .bg(cx.theme().secondary)
+                                .border_1()
+                                .border_color(cx.theme().secondary_hover)
+                                .text_color(cx.theme().secondary_foreground)
+                                .p_1()
+                                .child(
+                                    self.value_formatter
+                                        .as_ref()
+                                        .map(|f| f(*value))
+                                        .unwrap_or_else(|| value.to_string()),
+                                ),
+                        )
+                    }),
+            )
             .child(
                 div()
                     .child(

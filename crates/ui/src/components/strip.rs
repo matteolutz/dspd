@@ -101,7 +101,8 @@ impl ChannelStrip {
                 cx,
             )
         });
-        let knob = cx.new(|cx| Knob::new(knob_value, cx));
+        let knob =
+            cx.new(|cx| Knob::new(knob_value, cx).on_double_click(|val| *val = 120.0 / 144.0));
 
         let _subs = vec![
             cx.observe_and_notify(strip),
@@ -204,7 +205,7 @@ impl Render for ChannelStrip {
                             .font_family(cx.theme().mono_font_family.clone())
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!("{:0>2}", self.strip.read(cx).input + 1)),
+                            .child(format!("{:0>2}", self.strip.read(cx).strip_idx + 1)),
                     )
                     .child(div().text_base().font_semibold().child(strip.name.clone())),
             )
@@ -264,13 +265,8 @@ impl Render for ChannelStrip {
                                 .h_8()
                                 .p_2()
                                 .rounded(cx.theme().radius * 0.5)
-                                .child(
-                                    stage
-                                        .read(cx)
-                                        .name(cx)
-                                        .map(|name| name.to_string())
-                                        .unwrap_or_else(|| stage.read(cx).id_str().to_string()),
-                                )
+                                .text_ellipsis()
+                                .child(stage.read(cx).name_or_id(cx).to_string())
                         },
                     ))
                     .child(
