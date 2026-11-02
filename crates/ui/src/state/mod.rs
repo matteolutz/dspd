@@ -147,14 +147,12 @@ impl UiState {
             }
             WebSocketEvent::UpdateMeterInfos { meters } => {
                 Self::meters(cx).update(cx, |meter_state, cx| {
-                    meter_state.update_layout(meters.iter().cloned());
-                    cx.notify();
+                    meter_state.update_layout(meters.iter().cloned(), cx)
                 });
             }
             WebSocketEvent::UpdateMeterValues { values } => {
                 Self::meters(cx).update(cx, |meter_state, cx| {
-                    meter_state.update_values(values.clone());
-                    cx.notify();
+                    meter_state.update_values(values.clone(), cx)
                 });
             }
             &WebSocketEvent::UpdateParam {
