@@ -233,7 +233,9 @@ fn main() {
 
         open_window(
             WindowOptions {
-                window_bounds: Some(WindowBounds::Maximized(Bounds::default())),
+                window_bounds: Some(WindowBounds::Maximized(
+                    Bounds::maximized(None, cx).inset(px(100.0)),
+                )),
                 ..Default::default()
             },
             cx,
