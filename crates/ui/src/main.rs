@@ -202,11 +202,22 @@ impl Render for HelloWorld {
 mod actions {
     use gpui_kit::{App, KeyBinding};
 
-    gpui_kit::actions!(dspd, [Quit]);
+    use crate::state::{tab::UiTab, UiState};
+
+    gpui_kit::actions!(dspd, [Quit, SwitchStripsRack]);
 
     pub fn init(cx: &mut App) {
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        cx.bind_keys([KeyBinding::new("tab", SwitchStripsRack, None)]);
+
         cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.on_action(|_: &SwitchStripsRack, cx| {
+            UiState::tab_state(cx).update(cx, |tab_state, cx| match tab_state {
+                UiTab::Strips => tab_state.select_tab(UiTab::Rack, cx),
+                UiTab::Rack => tab_state.select_tab(UiTab::Strips, cx),
+                _ => {}
+            });
+        });
     }
 }
 
