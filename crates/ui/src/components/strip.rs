@@ -7,7 +7,7 @@ use gpui_kit::{
     div,
     prelude::FluentBuilder,
     rems, rgb, App, AppContext, Context, Entity, Hsla, InteractiveElement, ParentElement, Render,
-    StatefulInteractiveElement, Styled, Subscription,
+    StatefulInteractiveElement, Styled, Subscription, Window,
 };
 use serde_json::json;
 
@@ -88,7 +88,7 @@ pub struct ChannelStrip {
 }
 
 impl ChannelStrip {
-    pub fn new(strip: &Entity<Strip>, cx: &mut Context<Self>) -> Self {
+    pub fn new(strip: &Entity<Strip>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let gain_stage = strip.read(cx).stages().nth(1).unwrap().clone();
 
         let knob_value = cx.new(|cx| {
@@ -101,8 +101,9 @@ impl ChannelStrip {
                 cx,
             )
         });
-        let knob =
-            cx.new(|cx| Knob::new(knob_value, cx).on_double_click(|val| *val = 120.0 / 144.0));
+        let knob = cx.new(|cx| {
+            Knob::new(knob_value, window, cx).on_double_click(|val| *val = 120.0 / 144.0)
+        });
 
         let _subs = vec![
             cx.observe_and_notify(strip),

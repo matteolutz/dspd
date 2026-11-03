@@ -1,6 +1,6 @@
 use gpui_kit::{
     div, App, AppContext, Context, Entity, FocusHandle, InteractiveElement, ParentElement, Render,
-    ScrollHandle, StatefulInteractiveElement, Styled, Subscription,
+    ScrollHandle, StatefulInteractiveElement, Styled, Subscription, Window,
 };
 
 use crate::{
@@ -41,12 +41,12 @@ pub struct StripsTab {
 }
 
 impl StripsTab {
-    pub fn new(cx: &mut Context<Self>) -> Self {
-        let strips = Self::collect_strips(cx);
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let strips = Self::collect_strips(window, cx);
 
         let _subs = vec![
-            cx.observe(&UiState::session(cx), |this, _, cx| {
-                this.strips = Self::collect_strips(cx);
+            cx.observe_in(&UiState::session(cx), window, |this, _, window, cx| {
+                this.strips = Self::collect_strips(window, cx);
                 cx.notify();
             }),
             cx.subscribe(&UiState::strip_selection(cx), |this, _, evt, _| {
@@ -79,13 +79,16 @@ impl StripsTab {
 }
 
 impl StripsTab {
-    fn collect_strips(cx: &mut App) -> Vec<Entity<crate::components::ChannelStrip>> {
+    fn collect_strips(
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Vec<Entity<crate::components::ChannelStrip>> {
         UiState::strips(cx)
             // we need to collect into a Vec<Entity<_>> first, because we
             // can't borrow cx mutably while iterating over the strips
             .collect::<Vec<_>>()
             .into_iter()
-            .map(|strip| cx.new(|cx| crate::components::ChannelStrip::new(&strip, cx)))
+            .map(|strip| cx.new(|cx| crate::components::ChannelStrip::new(&strip, window, cx)))
             .collect()
     }
 }

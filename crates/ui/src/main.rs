@@ -30,7 +30,7 @@ struct HelloWorld {
 }
 
 impl HelloWorld {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let stats = UiState::stats(cx);
         let is_up = UiState::is_websocket_connected(cx);
         let session = UiState::session(cx);
@@ -41,8 +41,8 @@ impl HelloWorld {
             cx.observe_and_notify(&session),
         ];
 
-        let strips_tab = cx.new(|cx| tabs::StripsTab::new(cx));
-        let rack_tab = cx.new(|cx| tabs::RackTab::new(cx));
+        let strips_tab = cx.new(|cx| tabs::StripsTab::new(window, cx));
+        let rack_tab = cx.new(|cx| tabs::RackTab::new(window, cx));
 
         Self {
             stats,
@@ -237,7 +237,7 @@ fn main() {
                 ..Default::default()
             },
             cx,
-            |_, cx| cx.new(|cx| HelloWorld::new(cx)),
+            |window, cx| cx.new(|cx| HelloWorld::new(window, cx)),
         )
         .expect("Failed to open window");
     });

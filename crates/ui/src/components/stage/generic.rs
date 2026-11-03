@@ -4,7 +4,7 @@ use gpui_kit::{
     div,
     prelude::FluentBuilder,
     AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled,
-    Subscription,
+    Subscription, Window,
 };
 use serde_json::json;
 
@@ -40,8 +40,8 @@ pub struct GenericStageEditor {
 }
 
 impl GenericStageEditor {
-    pub fn new(stage: &Entity<Stage>, cx: &mut Context<Self>) -> Self {
-        let knobs = Self::make_knobs(stage, cx);
+    pub fn new(stage: &Entity<Stage>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let knobs = Self::make_knobs(stage, window, cx);
         let meters = stage
             .read(cx)
             .get_meters(cx)
@@ -63,7 +63,11 @@ impl GenericStageEditor {
         }
     }
 
-    fn make_knobs(stage: &Entity<Stage>, cx: &mut Context<Self>) -> Vec<GenericStageKnob> {
+    fn make_knobs(
+        stage: &Entity<Stage>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<GenericStageKnob> {
         let Some(descriptor) = stage.read(cx).descriptor(cx).cloned() else {
             return vec![];
         };
@@ -91,7 +95,7 @@ impl GenericStageEditor {
                 });
 
                 let knob = cx.new(|cx| {
-                    Knob::new(value, cx)
+                    Knob::new(value, window, cx)
                         .on_double_click(move |val| {
                             *val = map_range(
                                 param.default as f32,

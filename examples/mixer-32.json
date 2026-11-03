@@ -20,7 +20,7 @@
           "type": "dyn_eq"
         },
         {
-          "type": "com.dusk-audio.duskverb"
+          "type": "com.T-Audio.peakeater"
         },
         {
           "type": "peak_meter"

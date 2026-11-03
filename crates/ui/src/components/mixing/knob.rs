@@ -1,13 +1,14 @@
 use std::rc::Rc;
 
 use gpui_kit::{
-    base::{InteractiveElementExt, Popup},
+    base::{input::InputState, InteractiveElementExt, Popup},
     canvas,
     component::ActiveTheme,
     div,
     prelude::FluentBuilder,
-    px, Anchor, Context, DispatchPhase, Entity, EventEmitter, InteractiveElement, MouseMoveEvent,
-    ParentElement, PathBuilder, Pixels, Point, Render, Styled, Subscription,
+    px, Anchor, AppContext, Context, DispatchPhase, Entity, EventEmitter, InteractiveElement,
+    MouseMoveEvent, ParentElement, PathBuilder, Pixels, Point, Render, Styled, Subscription,
+    Window,
 };
 
 use crate::{components::mixing::MixingComponentValue, context::GpuiContextExtension};
@@ -24,6 +25,9 @@ pub struct Knob {
     value: Entity<MixingComponentValue<f32>>,
     mouse_down_pos: Option<Point<Pixels>>,
 
+    text_input: Entity<InputState>,
+    text_input_shown: bool,
+
     on_double_click: Option<Rc<dyn Fn(&mut f32)>>,
     value_formatter: Option<Rc<dyn Fn(f32) -> String>>,
 
@@ -31,7 +35,13 @@ pub struct Knob {
 }
 
 impl Knob {
-    pub fn new(value: Entity<MixingComponentValue<f32>>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        value: Entity<MixingComponentValue<f32>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let text_input = cx.new(|cx| InputState::new(window, cx));
+
         let _subs = vec![cx.observe_and_notify(&value)];
 
         Self {
@@ -39,6 +49,8 @@ impl Knob {
             mouse_down_pos: None,
             on_double_click: None,
             value_formatter: None,
+            text_input,
+            text_input_shown: false,
             _subs,
         }
     }

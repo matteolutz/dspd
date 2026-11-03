@@ -8,7 +8,7 @@ use gpui_kit::{
     div,
     prelude::FluentBuilder,
     AnyView, App, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, Render, StatefulInteractiveElement, Styled, Subscription,
+    ParentElement, Render, StatefulInteractiveElement, Styled, Subscription, Window,
 };
 
 use crate::{
@@ -67,14 +67,15 @@ pub struct RackTab {
 }
 
 impl RackTab {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let _subs = vec![
             cx.observe_and_notify(&UiState::strip_selection(cx)),
-            cx.subscribe(
+            cx.subscribe_in(
                 &UiState::strip_selection(cx),
-                |this, _, evt, cx| match evt {
+                window,
+                |this, _, evt, window, cx| match evt {
                     StripSelectionEvent::StripChanged(_) => {
-                        this.stages = Self::make_stages(cx);
+                        this.stages = Self::make_stages(window, cx);
                         cx.notify();
                     }
                     _ => {}
@@ -82,7 +83,7 @@ impl RackTab {
             ),
         ];
 
-        let stages = Self::make_stages(cx);
+        let stages = Self::make_stages(window, cx);
 
         Self {
             stages,
@@ -92,7 +93,10 @@ impl RackTab {
         }
     }
 
-    fn make_stages(cx: &mut Context<Self>) -> [Option<RackStage>; MAX_PLUGINS] {
+    fn make_stages(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> [Option<RackStage>; MAX_PLUGINS] {
         let Some(strip) = UiState::strip_selection(cx)
             .read(cx)
             .selected_strip_entity(cx)
@@ -115,14 +119,14 @@ impl RackTab {
             s.map(|s| {
                 let editor: AnyView = match s.read(cx).id_str().to_string().as_str() {
                     "dyn_eq" => cx.new(|cx| DynEqEditor::new(&s, cx)).into(),
-                    _ => cx.new(|cx| GenericStageEditor::new(&s, cx)).into(),
+                    _ => cx.new(|cx| GenericStageEditor::new(&s, window, cx)).into(),
                 };
 
                 let generic_editor: Entity<GenericStageEditor> =
                     if let Ok(editor) = editor.clone().downcast::<GenericStageEditor>() {
                         editor.into()
                     } else {
-                        cx.new(|cx| GenericStageEditor::new(&s, cx)).into()
+                        cx.new(|cx| GenericStageEditor::new(&s, window, cx)).into()
                     };
 
                 RackStage {
