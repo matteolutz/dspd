@@ -14,7 +14,7 @@ use crate::{
         mixing::{Knob, KnobEvent, MixingComponentValue},
     },
     context::GpuiContextExtension,
-    state::{MetersStateContextExt, ParamUnitToString, RequestBuilderExt, Stage, UiState},
+    state::{MetersStateContextExt, RequestBuilderExt, Stage, UiState},
     utils::map_range,
 };
 
@@ -105,11 +105,21 @@ impl GenericStageEditor {
                                 1.0,
                             );
                         })
-                        .with_value_formatter(move |val| {
-                            let mapped =
-                                map_range(val, 0.0, 1.0, param.min as f32, param.max as f32);
-                            format!("{:.1}{}", mapped, param.unit.as_str())
-                        })
+                        .with_unit_range(
+                            param.unit,
+                            param.min as f32,
+                            param.max as f32,
+                            1,
+                            window,
+                            cx,
+                        )
+                        .with_default_value(map_range(
+                            param.default as f32,
+                            param.min as f32,
+                            param.max as f32,
+                            0.0,
+                            1.0,
+                        ))
                 });
 
                 let _subs = vec![cx.subscribe_with_entity(
