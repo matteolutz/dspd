@@ -20,9 +20,6 @@
           "type": "dyn_eq"
         },
         {
-          "type": "com.T-Audio.peakeater"
-        },
-        {
           "type": "peak_meter"
         }
       ]
