@@ -3,12 +3,15 @@ use gpui_kit::{
     base::StyledExt,
     component::{
         button::{Button, ButtonVariants},
+        combobox::{Combobox, ComboboxState},
+        searchable_list::SearchableListItem,
+        select::{SearchableVec, SelectListItem},
         ActiveTheme, Colorize, Sizable, Size,
     },
     div,
     prelude::FluentBuilder,
     AnyView, App, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, Render, StatefulInteractiveElement, Styled, Subscription, Window,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
 };
 
 use crate::{
@@ -51,6 +54,29 @@ pub(super) fn init(cx: &mut App) {
 
 const MAX_PLUGINS: usize = 8;
 
+#[derive(Clone)]
+struct RackStagePluginListItem {
+    id_str: SharedString,
+    name: SharedString,
+}
+
+impl SearchableListItem for RackStagePluginListItem {
+    type Value = SharedString;
+
+    fn title(&self) -> SharedString {
+        self.name.clone()
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.id_str
+    }
+
+    fn matches(&self, query: &str) -> bool {
+        let query = query.to_lowercase();
+        self.name.to_lowercase().contains(&query) || self.id_str.contains(&query)
+    }
+}
+
 struct RackStage {
     stage: Entity<Stage>,
     editor: AnyView,
@@ -61,6 +87,8 @@ pub struct RackTab {
     stages: [Option<RackStage>; MAX_PLUGINS],
 
     use_generic_editor: bool,
+
+    new_plugin_combobox: Entity<ComboboxState<SearchableVec<RackStagePluginListItem>>>,
 
     _subs: Vec<Subscription>,
     focus_handle: FocusHandle,
@@ -84,13 +112,33 @@ impl RackTab {
         ];
 
         let stages = Self::make_stages(window, cx);
+        let new_plugin_combobox = Self::make_plugin_list(window, cx);
 
         Self {
             stages,
             _subs,
             use_generic_editor: false,
             focus_handle: cx.focus_handle(),
+            new_plugin_combobox,
         }
+    }
+
+    fn make_plugin_list(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<ComboboxState<SearchableVec<RackStagePluginListItem>>> {
+        let plugins = UiState::registry(cx)
+            .read(cx)
+            .iter_plugins()
+            .map(|p| RackStagePluginListItem {
+                name: p.name.as_str().into(),
+                id_str: p.id.as_str().into(),
+            })
+            .collect::<Vec<_>>();
+
+        let delegate = SearchableVec::new(plugins);
+
+        cx.new(|cx| ComboboxState::new(delegate, vec![], window, cx))
     }
 
     fn make_stages(
@@ -273,19 +321,24 @@ impl Render for RackTab {
                                                 .px_2()
                                                 .font_semibold()
                                                 .child(stage.read(cx).name_or_id(cx).to_string()),
-                                        ),
-                                    None => div()
-                                        .id(("stage", idx))
-                                        .hover(|this| this.bg(cx.theme().secondary))
-                                        .w_full()
-                                        .flex_1()
-                                        .border_1()
-                                        .border_color(cx.theme().secondary)
-                                        .bg(cx.theme().border)
-                                        .flex()
-                                        .justify_center()
-                                        .items_center()
-                                        .child("ADD PLUGIN"),
+                                        )
+                                        .into_any_element(),
+                                    None => Combobox::new(&self.new_plugin_combobox)
+                                        .render_trigger(move |_, _, cx| {
+                                            div()
+                                                .id(("stage", idx))
+                                                .hover(|this| this.bg(cx.theme().secondary))
+                                                .w_full()
+                                                .flex_1()
+                                                .border_1()
+                                                .border_color(cx.theme().secondary)
+                                                .bg(cx.theme().border)
+                                                .flex()
+                                                .justify_center()
+                                                .items_center()
+                                                .child("ADD PLUGIN")
+                                        })
+                                        .into_any_element(),
                                 }
                             })),
                     )
