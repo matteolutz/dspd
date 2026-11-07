@@ -12,6 +12,19 @@ use jack::contrib::controller::ControlledProcessorTrait;
 
 use crate::{AudioBackend, RunReport};
 
+mod daemon;
+pub use daemon::*;
+
+#[derive(Default)]
+pub struct JackBackendDaemonOptions {
+    pub input_device: Option<String>,
+    pub output_device: Option<String>,
+
+    pub realtime: JackDaemonRealtimeConfig,
+
+    pub no_audio_reservation: bool,
+}
+
 pub struct JackBackend {
     in_channels: usize,
     out_channels: usize,
@@ -20,6 +33,8 @@ pub struct JackBackend {
     max_block_size: usize,
 
     sample_rate: u32,
+
+    daemon: Option<JackDaemon>,
 }
 
 impl JackBackend {
@@ -29,14 +44,30 @@ impl JackBackend {
         block_size: usize,
         max_block_size: usize,
         sample_rate: u32,
-    ) -> Self {
-        Self {
+        daemon_options: Option<JackBackendDaemonOptions>,
+    ) -> anyhow::Result<Self> {
+        let mut daemon = None;
+        if let Some(daemon_options) = daemon_options {
+            daemon = Some(JackDaemon::start(&JackDaemonConfig {
+                sample_rate,
+                period_size: block_size as u32,
+                periods: 3,
+                backend: "alsa".into(),
+                capture_device: daemon_options.input_device,
+                playback_device: daemon_options.output_device,
+                realtime: daemon_options.realtime,
+                no_audio_reservation: daemon_options.no_audio_reservation,
+            })?);
+        }
+
+        Ok(Self {
             in_channels,
             out_channels,
             block_size,
             max_block_size,
             sample_rate,
-        }
+            daemon,
+        })
     }
 }
 

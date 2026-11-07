@@ -18,6 +18,8 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
+#[cfg(feature = "jack-backend")]
+use dspd_audio::JackBackendDaemonOptions;
 use dspd_audio::{probe_wav, AudioBackend, NullBackend, OfflineBackend, RunReport, Signal};
 use dspd_control::ControlState;
 use dspd_engine::{
@@ -167,14 +169,24 @@ struct ServeArgs {
     #[arg(long)]
     pin_cpu: Option<usize>,
     /// cpal backend: input device name (substring match).
+    /// jack backend: output device name (alsa hw: device name, e.g. `hw:0`).
     #[arg(short, long)]
     input_device: Option<String>,
     /// cpal backend: output device name (substring match).
+    /// jack backend: output device name (alsa hw: device name, e.g. `hw:0`).
     #[arg(short, long)]
     output_device: Option<String>,
     /// cpal backend: do not capture; feed the chain silence.
     #[arg(long)]
     no_input: bool,
+
+    /// Start the JACK daemon if it is not already running (jack backend only).
+    #[arg(long)]
+    start_jack: bool,
+
+    /// jack backend: disable JACK audio reservation (JACK_NO_AUDIO_RESERVATION=1).
+    #[arg(long)]
+    no_audio_reservation: bool,
 }
 
 #[derive(clap::Args)]
@@ -500,13 +512,28 @@ fn serve(a: ServeArgs) -> Result<()> {
             Box::new(b)
         }
         #[cfg(feature = "jack-backend")]
-        BackendArg::Jack => Box::new(dspd_audio::JackBackend::new(
-            spec.input_channels(),
-            spec.output_channels(),
-            a.block,
-            spec.max_block,
-            spec.sample_rate,
-        )),
+        BackendArg::Jack => {
+            use dspd_audio::JackDaemonRealtimeConfig;
+
+            let daemon_options = a.start_jack.then(|| JackBackendDaemonOptions {
+                input_device: a.input_device.clone(),
+                output_device: a.output_device.clone(),
+                no_audio_reservation: a.no_audio_reservation,
+                realtime: JackDaemonRealtimeConfig {
+                    enabled: a.rt_priority.is_some(),
+                    priority: a.rt_priority.map(|p| p as u8),
+                },
+            });
+
+            Box::new(dspd_audio::JackBackend::new(
+                spec.input_channels(),
+                spec.output_channels(),
+                a.block,
+                spec.max_block,
+                spec.sample_rate,
+                daemon_options,
+            )?)
+        }
     };
 
     tracing::info!(

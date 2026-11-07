@@ -35,7 +35,9 @@ pub use offline::{probe_wav, OfflineBackend, WavInfo};
 pub use cpal_backend::{list_device_configs, list_devices, list_hosts, CpalBackend};
 
 #[cfg(feature = "jack-backend")]
-pub use jack_backend::JackBackend;
+pub use jack_backend::{
+    JackBackend, JackBackendDaemonOptions, JackDaemon, JackDaemonConfig, JackDaemonRealtimeConfig,
+};
 
 /// What a backend run produced.
 #[derive(Clone, Copy, Debug, Default)]
