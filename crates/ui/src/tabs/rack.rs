@@ -1,23 +1,26 @@
+use std::rc::Rc;
+
 use gpui_kit::{
     assets::IconName,
     base::StyledExt,
     component::{
         button::{Button, ButtonVariants},
-        combobox::{Combobox, ComboboxState},
-        searchable_list::SearchableListItem,
-        select::{SearchableVec, SelectListItem},
         ActiveTheme, Colorize, Sizable, Size,
     },
     div,
     prelude::FluentBuilder,
-    AnyView, App, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
+    rems, AnyView, App, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
 };
+use itertools::Itertools;
+use serde_json::json;
 
 use crate::{
-    components::{ChannelStripColor, DynEqEditor, GenericStageEditor},
+    components::{
+        ChannelStripColor, DynEqEditor, GenericStageEditor, ListPicker, ListPickerElement,
+    },
     context::GpuiContextExtension,
-    state::{Stage, StripSelectionEvent, UiState},
+    state::{RequestBuilderExt, Stage, StripSelectionEvent, UiState},
     tabs::utils::{self, select_stage},
 };
 
@@ -54,26 +57,20 @@ pub(super) fn init(cx: &mut App) {
 
 const MAX_PLUGINS: usize = 8;
 
-#[derive(Clone)]
 struct RackStagePluginListItem {
     id_str: SharedString,
     name: SharedString,
 }
 
-impl SearchableListItem for RackStagePluginListItem {
-    type Value = SharedString;
+impl ListPickerElement for Rc<RackStagePluginListItem> {
+    type Id = SharedString;
 
-    fn title(&self) -> SharedString {
+    fn display_name(&self) -> SharedString {
         self.name.clone()
     }
 
-    fn value(&self) -> &Self::Value {
-        &self.id_str
-    }
-
-    fn matches(&self, query: &str) -> bool {
-        let query = query.to_lowercase();
-        self.name.to_lowercase().contains(&query) || self.id_str.contains(&query)
+    fn id(&self) -> Self::Id {
+        self.id_str.clone()
     }
 }
 
@@ -88,9 +85,11 @@ pub struct RackTab {
 
     use_generic_editor: bool,
 
-    new_plugin_combobox: Entity<ComboboxState<SearchableVec<RackStagePluginListItem>>>,
+    plugin_list: Vec<Rc<RackStagePluginListItem>>,
 
     _subs: Vec<Subscription>,
+    strip_subscription: Option<Subscription>,
+
     focus_handle: FocusHandle,
 }
 
@@ -103,6 +102,7 @@ impl RackTab {
                 window,
                 |this, _, evt, window, cx| match evt {
                     StripSelectionEvent::StripChanged(_) => {
+                        this.strip_subscription = Self::make_strip_subscription(window, cx);
                         this.stages = Self::make_stages(window, cx);
                         cx.notify();
                     }
@@ -112,33 +112,48 @@ impl RackTab {
         ];
 
         let stages = Self::make_stages(window, cx);
-        let new_plugin_combobox = Self::make_plugin_list(window, cx);
+        let plugin_list = Self::make_plugin_list(cx);
+
+        let strip_subscription = Self::make_strip_subscription(window, cx);
 
         Self {
             stages,
             _subs,
+            strip_subscription,
+            plugin_list,
             use_generic_editor: false,
             focus_handle: cx.focus_handle(),
-            new_plugin_combobox,
         }
     }
 
-    fn make_plugin_list(
+    fn make_strip_subscription(
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Entity<ComboboxState<SearchableVec<RackStagePluginListItem>>> {
-        let plugins = UiState::registry(cx)
+    ) -> Option<Subscription> {
+        let Some(strip) = UiState::strip_selection(cx)
+            .read(cx)
+            .selected_strip_entity(cx)
+        else {
+            return None;
+        };
+
+        Some(cx.observe_in(&strip, window, |this, _, window, cx| {
+            this.stages = Self::make_stages(window, cx);
+            cx.notify();
+        }))
+    }
+
+    fn make_plugin_list(cx: &App) -> Vec<Rc<RackStagePluginListItem>> {
+        UiState::registry(cx)
             .read(cx)
             .iter_plugins()
+            .sorted_by_key(|p| p.name.as_str())
             .map(|p| RackStagePluginListItem {
                 name: p.name.as_str().into(),
                 id_str: p.id.as_str().into(),
             })
-            .collect::<Vec<_>>();
-
-        let delegate = SearchableVec::new(plugins);
-
-        cx.new(|cx| ComboboxState::new(delegate, vec![], window, cx))
+            .map(Rc::new)
+            .collect()
     }
 
     fn make_stages(
@@ -208,6 +223,10 @@ impl Render for RackTab {
                 .child("Please select a channel strip to view its rack")
                 .into_any_element();
         };
+
+        let selected_strip_idx = strip.read(cx).strip_idx;
+        let first_non_meter_stage_idx =
+            strip.read(cx).first_non_io_meter_stage_idx(cx).unwrap_or(0);
 
         let selected_stage_idx = strip_selection.selected_stage();
         let selected_stage = selected_stage_idx.and_then(|idx| self.stages[idx].as_ref());
@@ -323,22 +342,43 @@ impl Render for RackTab {
                                                 .child(stage.read(cx).name_or_id(cx).to_string()),
                                         )
                                         .into_any_element(),
-                                    None => Combobox::new(&self.new_plugin_combobox)
-                                        .render_trigger(move |_, _, cx| {
-                                            div()
-                                                .id(("stage", idx))
-                                                .hover(|this| this.bg(cx.theme().secondary))
-                                                .w_full()
-                                                .flex_1()
-                                                .border_1()
-                                                .border_color(cx.theme().secondary)
-                                                .bg(cx.theme().border)
-                                                .flex()
-                                                .justify_center()
-                                                .items_center()
-                                                .child("ADD PLUGIN")
-                                        })
-                                        .into_any_element(),
+                                    None => ListPicker::new(
+                                        ("stage", idx),
+                                        self.plugin_list.iter().cloned(),
+                                    )
+                                    .list_item_height(rems(3.0))
+                                    .on_pick(move |entry, _, cx| {
+                                        let stage_idx = idx + first_non_meter_stage_idx;
+
+                                        match UiState::client(cx)
+                                            .post(format!("/strips/{}/stages", selected_strip_idx))
+                                            .content_type_json()
+                                            .body(
+                                                json!({
+                                                    "index": stage_idx + 1,
+                                                    "stage": {
+                                                        "type": &entry.id_str
+                                                    }
+                                                })
+                                                .to_string(),
+                                            )
+                                            .send()
+                                        {
+                                            Ok(res) => println!("res: {}", res.text().unwrap()),
+                                            Err(e) => println!("Failed to add stage: {}", e),
+                                        }
+                                    })
+                                    .hover(|this| this.bg(cx.theme().secondary))
+                                    .w_full()
+                                    .flex_1()
+                                    .border_1()
+                                    .border_color(cx.theme().secondary)
+                                    .bg(cx.theme().border)
+                                    .flex()
+                                    .justify_center()
+                                    .items_center()
+                                    .child("ADD PLUGIN")
+                                    .into_any_element(),
                                 }
                             })),
                     )

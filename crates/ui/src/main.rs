@@ -4,6 +4,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use itertools::Itertools;
 
+use crate::components::{WindowContext, WindowExt};
 use crate::context::GpuiContextExtension;
 use crate::state::tab::UiTab;
 use crate::state::{EngineStats, Session, UiState};
@@ -58,7 +59,7 @@ impl HelloWorld {
 }
 
 impl Render for HelloWorld {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let selected_tab = *UiState::tab_state(cx).read(cx);
         let selected_tab_idx: usize = selected_tab.into();
 
@@ -196,6 +197,7 @@ impl Render for HelloWorld {
                         self.session.read(cx).total_stages(cx)
                     )),
             )
+            .child(window.window_context(cx).list_picker())
     }
 }
 
@@ -227,6 +229,7 @@ fn main() {
         theme::set_theme(cx);
 
         actions::init(cx);
+        components::init(cx);
         tabs::init(cx);
 
         UiState::init("http://localhost:8080", cx);
@@ -239,7 +242,10 @@ fn main() {
                 ..Default::default()
             },
             cx,
-            |window, cx| cx.new(|cx| HelloWorld::new(window, cx)),
+            |window, cx| {
+                WindowContext::init(window, cx);
+                cx.new(|cx| HelloWorld::new(window, cx))
+            },
         )
         .expect("Failed to open window");
     });

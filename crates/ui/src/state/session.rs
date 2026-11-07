@@ -1,5 +1,6 @@
 use dspd_api::{MeterType, StageSpec};
 use gpui_kit::{App, AppContext, Context, Entity, SharedString, WeakEntity};
+use itertools::Itertools;
 
 use crate::state::{registry::Registry, MetersState, PluginDescriptor, UiState};
 
@@ -273,6 +274,13 @@ impl Strip {
 
     pub fn stages(&self) -> impl Iterator<Item = &Entity<Stage>> {
         self.chain.iter()
+    }
+
+    pub fn first_non_io_meter_stage_idx(&self, cx: &App) -> Option<usize> {
+        self.chain
+            .iter()
+            .find_position(|stage| stage.read(cx).is_native_plugin("peak_meter"))
+            .map(|(pos, _)| pos)
     }
 
     pub fn stages_without_io_meters<'a>(
