@@ -82,63 +82,19 @@ impl Into<Hsla> for ChannelStripColor {
 pub struct ChannelStrip {
     strip: Entity<Strip>,
 
-    knob: Entity<Knob>,
-
     _subs: Vec<Subscription>,
 }
 
 impl ChannelStrip {
     pub fn new(strip: &Entity<Strip>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let gain_stage = strip.read(cx).stages().nth(1).unwrap().clone();
-
-        let knob_value = cx.new(|cx| {
-            MixingComponentValue::from_entity_with(
-                &gain_stage,
-                |s| {
-                    let db_value = s.get_param(0).unwrap_or(0.0);
-                    ((db_value + 120.0) / 144.0).clamp(0.0, 1.0) as f32
-                },
-                cx,
-            )
-        });
-        let knob = cx.new(|cx| {
-            Knob::new(knob_value, window, cx).on_double_click(|val| *val = 120.0 / 144.0)
-        });
-
         let _subs = vec![
             cx.observe_and_notify(strip),
             cx.observe_and_notify(&UiState::tab_state(cx)),
             cx.observe_and_notify(&UiState::meters(cx)),
-            cx.subscribe(&knob, |this, _, evt: &KnobEvent, cx| match evt {
-                KnobEvent::ValueChanged(value) => {
-                    let strip_idx = this.strip.read(cx).strip_idx;
-                    let db_value = (value * 144.0) - 120.0;
-
-                    match UiState::client(cx)
-                        .post("/params")
-                        .content_type_json()
-                        .body(
-                            json!({
-                                "strip": strip_idx,
-                                "stage": 1,
-                                "param_id": 0,
-                                "value": db_value
-                            })
-                            .to_string(),
-                        )
-                        .send()
-                    {
-                        Ok(_) => {}
-                        Err(e) => println!("knob failed: {}", e),
-                    }
-                }
-                _ => {}
-            }),
         ];
 
         Self {
             strip: strip.clone(),
-            knob,
             _subs,
         }
     }
@@ -281,13 +237,6 @@ impl Render for ChannelStrip {
                             .child("+"),
                     ),
             ) // plugin list
-            .child(
-                Self::strip_section(cx)
-                    .flex()
-                    .justify_center()
-                    .items_center()
-                    .child(self.knob.clone()),
-            )
             .when_some(strip.get_output_level_meters(cx), |this, levels| {
                 this.child(
                     Self::strip_section(cx)
