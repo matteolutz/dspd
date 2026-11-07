@@ -9,6 +9,12 @@
       "chain": [
         {
           "type": "peak_meter"
+        },
+        {
+          "type": "gain"
+        },
+        {
+          "type": "peak_meter"
         }
       ]
     }
