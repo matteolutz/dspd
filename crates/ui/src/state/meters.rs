@@ -37,13 +37,23 @@ pub struct MetersState {
 impl EventEmitter<MetersStateEvent> for MetersState {}
 
 impl MetersState {
+    pub(super) fn max_slot(&self) -> Option<usize> {
+        self.meters.iter().map(|m| m.slot).max()
+    }
+
     pub(super) fn update_values(&mut self, values: Vec<f32>, cx: &mut Context<Self>) {
-        if self.meters.len() != values.len() {
+        if self
+            .max_slot()
+            .is_some_and(|max_slot| values.len() != max_slot + 1)
+        {
+            println!("WARN: values.len() != max_slot + 1");
             return;
         }
 
         let mut updated_meters = Vec::new();
-        for (idx, (meter, value)) in self.meters.iter_mut().zip(values).enumerate() {
+        for (idx, meter) in self.meters.iter_mut().enumerate() {
+            let value = values[meter.slot];
+
             if meter.value.is_some_and(|old_value| old_value == value) {
                 continue;
             }
