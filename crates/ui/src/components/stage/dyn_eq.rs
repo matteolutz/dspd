@@ -2,8 +2,8 @@ use std::f32::consts::PI;
 
 use gpui_kit::{
     canvas, component::ActiveTheme, div, fill, point, px, size, Anchor, App, BorderStyle, Bounds,
-    Context, Entity, Font, PaintQuad, ParentElement, PathBuilder, Render, Styled, TextAlign,
-    TextRun,
+    Context, Entity, Font, HitboxBehavior, PaintQuad, ParentElement, PathBuilder, Render, Styled,
+    TextAlign, TextRun,
 };
 
 use crate::state::Stage;
@@ -121,8 +121,11 @@ impl Render for DynEqEditor {
             .p_2()
             .child(
                 canvas(
-                    move |bounds, _window, _cx| bounds, // prepaint: stash bounds for hit-testing
-                    move |bounds, _bounds, window, cx| {
+                    move |bounds, window, _cx| {
+                        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::BlockMouse);
+                        (bounds, hitbox)
+                    }, // prepaint: stash bounds for hit-testing
+                    move |bounds, (_bounds, hitbox), window, cx| {
                         let w: f32 = bounds.size.width.into(); // Pixels -> f32
                         let h: f32 = bounds.size.height.into();
                         let db_range = 24.0f32;
@@ -168,21 +171,25 @@ impl Render for DynEqEditor {
                                 pb.line_to(p)
                             }
                         }
+
                         if let Ok(path) = pb.build() {
                             window.paint_path(path, cx.theme().primary);
                         }
 
-                        // optional: fill under the curve to the 0 dB line using PathBuilder::fill()
-                        // nodes
-
+                        let mut cursor_pointer = false;
                         for (idx, (band_freq, band_gain)) in bands.iter().enumerate() {
                             let pos = point(
                                 bounds.left() + px(freq_to_x(*band_freq, w)),
                                 bounds.top() + px(db_to_y(*band_gain, h, db_range)),
                             );
+                            let bounds = Bounds::centered_at(pos, size(px(40.0), px(40.0)));
+
+                            if !cursor_pointer && bounds.contains(&window.mouse_position()) {
+                                cursor_pointer = true;
+                            }
 
                             window.paint_quad(PaintQuad {
-                                bounds: Bounds::centered_at(pos, size(px(40.0), px(40.0))),
+                                bounds,
                                 corner_radii: (20.).into(),
                                 background: cx.theme().primary.alpha(0.25).into(),
                                 border_widths: (2.).into(),
@@ -213,6 +220,15 @@ impl Render for DynEqEditor {
                                 cx,
                             );
                         }
+
+                        window.set_cursor_style(
+                            if cursor_pointer {
+                                gpui_kit::CursorStyle::OpenHand
+                            } else {
+                                gpui_kit::CursorStyle::default()
+                            },
+                            &hitbox,
+                        );
                     },
                 )
                 .size_full(),
