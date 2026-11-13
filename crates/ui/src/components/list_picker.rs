@@ -4,6 +4,7 @@ use std::{
 };
 
 use gpui_kit::{
+    base::Disableable,
     canvas,
     component::{
         button::{Button, ButtonVariants},
@@ -283,6 +284,8 @@ pub struct ListPicker<E: ListPickerElement> {
     id: ElementId,
     base: Stateful<Div>,
 
+    disabled: bool,
+
     elements: Vec<Rc<E>>,
     on_pick: Option<Rc<dyn Fn(&E, &mut Window, &mut gpui_kit::App)>>,
 
@@ -310,6 +313,13 @@ impl<E: ListPickerElement> InteractiveElement for ListPicker<E> {
     }
 }
 
+impl<E: ListPickerElement> Disableable for ListPicker<E> {
+    fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+}
+
 impl<E: ListPickerElement> ListPicker<E> {
     pub fn new(id: impl Into<ElementId>, elements: impl IntoIterator<Item = E>) -> Self {
         let id = id.into();
@@ -322,6 +332,7 @@ impl<E: ListPickerElement> ListPicker<E> {
             trigger_anchor: Anchor::BottomLeft,
             list_width: None,
             list_item_height: rems(2.0).into(),
+            disabled: false,
         }
     }
 
@@ -371,22 +382,24 @@ impl<E: ListPickerElement> RenderOnce for ListPicker<E> {
 
         self.base
             .relative()
-            .on_click({
-                let state = state.clone();
-                move |_, window, cx| {
-                    if let Some(bounds) = state.read(cx).bounds {
-                        ListPickerContext::open_picker(
-                            self.elements.clone(),
-                            self.on_pick.clone(),
-                            bounds,
-                            self.trigger_anchor,
-                            self.list_width.unwrap_or(bounds.size.width.into()),
-                            self.list_item_height,
-                            window,
-                            cx,
-                        );
+            .when(!self.disabled, |this| {
+                this.on_click({
+                    let state = state.clone();
+                    move |_, window, cx| {
+                        if let Some(bounds) = state.read(cx).bounds {
+                            ListPickerContext::open_picker(
+                                self.elements.clone(),
+                                self.on_pick.clone(),
+                                bounds,
+                                self.trigger_anchor,
+                                self.list_width.unwrap_or(bounds.size.width.into()),
+                                self.list_item_height,
+                                window,
+                                cx,
+                            );
+                        }
                     }
-                }
+                })
             })
             .child(
                 canvas(

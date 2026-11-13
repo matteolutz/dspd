@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use gpui_kit::{
     assets::IconName,
-    base::StyledExt,
+    base::{Disableable, StyledExt},
     component::{
         button::{Button, ButtonVariants},
         ActiveTheme, Colorize, Sizable, Size,
@@ -381,10 +381,16 @@ impl Render for RackTab {
                                         )
                                         .into_any_element()
                                     },
-                                    None => ListPicker::new(
+                                    None => {
+                                        // only the first button after the last stage should
+                                        // be enabled
+                                        let disabled = idx > 0 && self.stages[idx - 1].is_none();
+
+                                        ListPicker::new(
                                         ("stage", idx),
                                         self.plugin_list.iter().cloned(),
                                     )
+                                        .disabled(disabled)
                                     .list_item_height(rems(3.0))
                                     .on_pick(move |entry, _, cx| {
                                         let stage_idx = idx + first_non_meter_stage_idx;
@@ -407,7 +413,10 @@ impl Render for RackTab {
                                             Err(e) => println!("Failed to add stage: {}", e),
                                         }
                                     })
-                                    .hover(|this| this.bg(cx.theme().secondary))
+                                    .when_else(disabled,
+                                        |this| this.text_color(cx.theme().muted_foreground),
+                                        |this| this.hover(|this| this.bg(cx.theme().secondary))
+                                    )
                                     .w_full()
                                     .flex_1()
                                     .border_1()
@@ -417,7 +426,8 @@ impl Render for RackTab {
                                     .justify_center()
                                     .items_center()
                                     .child("ADD PLUGIN")
-                                    .into_any_element(),
+                                    .into_any_element()
+                                    },
                                 }
                             })),
                     )
