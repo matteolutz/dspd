@@ -16,6 +16,7 @@ mod state;
 mod tabs;
 mod theme;
 mod utils;
+mod window;
 
 struct HelloWorld {
     stats: Entity<EngineStats>,

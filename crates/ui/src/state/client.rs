@@ -31,6 +31,10 @@ impl DspdHttpClient {
     pub fn post(&self, path: impl AsRef<str>) -> reqwest::blocking::RequestBuilder {
         self.request(reqwest::Method::POST, path)
     }
+
+    pub fn delete(&self, path: impl AsRef<str>) -> reqwest::blocking::RequestBuilder {
+        self.request(reqwest::Method::DELETE, path)
+    }
 }
 
 pub trait RequestBuilderExt {

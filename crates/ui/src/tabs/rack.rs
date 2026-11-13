@@ -10,7 +10,8 @@ use gpui_kit::{
     div,
     prelude::FluentBuilder,
     rems, AnyView, App, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
+    ParentElement, PromptButton, PromptLevel, Render, SharedString, StatefulInteractiveElement,
+    Styled, Subscription, Window,
 };
 use itertools::Itertools;
 use serde_json::json;
@@ -22,6 +23,7 @@ use crate::{
     context::GpuiContextExtension,
     state::{RequestBuilderExt, Stage, StripSelectionEvent, UiState},
     tabs::utils::{self, select_stage},
+    window::WindowExt,
 };
 
 mod actions {
@@ -318,8 +320,12 @@ impl Render for RackTab {
                             .p_3()
                             .gap_2()
                             .children(self.stages.iter().enumerate().map(|(idx, stage)| {
+
                                 match stage {
-                                    Some(RackStage { stage, .. }) => div()
+                                    Some(RackStage { stage, .. }) => {
+                                        let stage_id = stage.read(cx).stage_id();
+
+                                        div()
                                         .id(("stage", idx))
                                         .on_click(move |_, _, cx| select_stage(idx, cx))
                                         .w_full()
@@ -337,11 +343,44 @@ impl Render for RackTab {
                                                 .bg(cx.theme().secondary.lighten(0.5))
                                                 .flex()
                                                 .items_center()
+                                                .justify_between()
                                                 .px_2()
                                                 .font_semibold()
-                                                .child(stage.read(cx).name_or_id(cx).to_string()),
+                                                .child(stage.read(cx).name_or_id(cx).to_string())
+                                                .child(
+                                                    Button::new(("delete-stage", idx))
+                                                        .icon(IconName::Minus)
+                                                        .ghost()
+                                                        .on_click({
+                                                            let stage_name = stage.read(cx).name_or_id(cx).to_string();
+                                                            move |_, window, cx| {
+                                                            window
+                                                                .spawn_detached_prompt(
+                                                                    PromptLevel::Warning,
+                                                                    "Remove stage",
+                                                                    Some(format!("Do you really want to remove this \"{}\" stage", stage_name).as_str()),
+                                                                    &[PromptButton::ok("Yes"), PromptButton::cancel("No")],
+                                                                    cx,
+                                                                    move |answer, _, cx| {
+                                                                        if answer != 0 {
+                                                                            return;
+                                                                        }
+
+                                                                        match UiState::client(cx)
+                                                                            .delete(format!("/strips/{}/stages/{}", selected_strip_idx, stage_id))
+                                                                            .send()
+                                                                        {
+                                                                            Ok(res) => println!("res: {}", res.text().unwrap()),
+                                                                            Err(e) => println!("Failed to add stage: {}", e),
+                                                                        }
+                                                                    }
+                                                                );
+                                                        }
+                                                        }),
+                                                ),
                                         )
-                                        .into_any_element(),
+                                        .into_any_element()
+                                    },
                                     None => ListPicker::new(
                                         ("stage", idx),
                                         self.plugin_list.iter().cloned(),
