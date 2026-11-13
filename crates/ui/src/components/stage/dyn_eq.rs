@@ -1,8 +1,9 @@
 use std::f32::consts::PI;
 
 use gpui_kit::{
-    canvas, component::ActiveTheme, div, fill, point, px, App, Context, Entity, ParentElement,
-    PathBuilder, Render, Styled,
+    canvas, component::ActiveTheme, div, fill, point, px, size, Anchor, App, BorderStyle, Bounds,
+    Context, Entity, Font, PaintQuad, ParentElement, PathBuilder, Render, Styled, TextAlign,
+    TextRun,
 };
 
 use crate::state::Stage;
@@ -31,6 +32,18 @@ fn peaking_mag_db(f: f32, f0: f32, q: f32, gain_db: f32, fs: f32) -> f32 {
 }
 
 const N: usize = 256;
+
+fn bands(stage: &Entity<Stage>, cx: &App) -> Vec<(f32, f32)> {
+    let stage = stage.read(cx);
+    (0..6)
+        .map(|band| {
+            let base = band * 8;
+            let f0 = stage.get_param(base).unwrap_or(1000.0) as f32;
+            let gain = stage.get_param(base + 2).unwrap_or(0.0) as f32;
+            (f0.clamp(20.0, 20_000.0), gain.clamp(-24.0, 24.0))
+        })
+        .collect()
+}
 
 fn curve_points(stage: &Entity<Stage>, fs: f32, cx: &App) -> Vec<(f32, f32)> {
     let stage = stage.read(cx);
@@ -92,10 +105,11 @@ impl DynEqEditor {
 impl Render for DynEqEditor {
     fn render(
         &mut self,
-        window: &mut gpui_kit::Window,
+        _window: &mut gpui_kit::Window,
         cx: &mut gpui_kit::prelude::Context<Self>,
     ) -> impl gpui_kit::prelude::IntoElement {
         let points = curve_points(&self.stage, 48_000.0, cx);
+        let bands = bands(&self.stage, cx);
 
         div()
             .size_full()
@@ -107,31 +121,101 @@ impl Render for DynEqEditor {
             .p_2()
             .child(
                 canvas(
-                    move |bounds, _window, _cx| bounds,                 // prepaint: stash bounds for hit-testing
+                    move |bounds, _window, _cx| bounds, // prepaint: stash bounds for hit-testing
                     move |bounds, _bounds, window, cx| {
-                        let w: f32 = bounds.size.width.into();   // Pixels -> f32
+                        let w: f32 = bounds.size.width.into(); // Pixels -> f32
                         let h: f32 = bounds.size.height.into();
+                        let db_range = 24.0f32;
 
                         // background + grid
                         window.paint_quad(fill(bounds, cx.theme().border));
-                        for f in [30., 50., 100., 200., 500., 1e3, 2e3, 5e3, 1e4] { /* thin vertical line */ }
-                        for db in [-18., -12., -6., 0., 6., 12., 18.] { /* thin horizontal line */ }
+                        for f in [30., 50., 100., 200., 500., 1e3, 2e3, 5e3, 1e4] {
+                            let x = bounds.left() + px(freq_to_x(f, w));
+
+                            window.paint_quad(fill(
+                                Bounds::from_anchor_and_size(
+                                    Anchor::TopLeft,
+                                    point(x, bounds.top()),
+                                    size(px(1.0), px(h)),
+                                ),
+                                cx.theme().secondary,
+                            ));
+                        }
+
+                        for db in [-18., -12., -6., 0., 6., 12., 18.] {
+                            let y = bounds.top() + px(db_to_y(db, w, db_range));
+
+                            window.paint_quad(fill(
+                                Bounds::from_anchor_and_size(
+                                    Anchor::TopLeft,
+                                    point(bounds.left(), y),
+                                    size(px(w), px(1.0)),
+                                ),
+                                cx.theme().secondary,
+                            ));
+                        }
 
                         // total curve
                         let mut pb = PathBuilder::stroke(px(2.0));
                         for (i, &(f, db)) in points.iter().enumerate() {
-                            let p = point(bounds.left() + px(freq_to_x(f, w)), bounds.top() + px(db_to_y(db, h, 24.0)));
-                            if i == 0 { pb.move_to(p) } else { pb.line_to(p) }
+                            let p = point(
+                                bounds.left() + px(freq_to_x(f, w)),
+                                bounds.top() + px(db_to_y(db, h, db_range)),
+                            );
+                            if i == 0 {
+                                pb.move_to(p)
+                            } else {
+                                pb.line_to(p)
+                            }
                         }
-                        if let Ok(path) = pb.build() { window.paint_path(path, cx.theme().primary); }
+                        if let Ok(path) = pb.build() {
+                            window.paint_path(path, cx.theme().primary);
+                        }
 
                         // optional: fill under the curve to the 0 dB line using PathBuilder::fill()
                         // nodes
 
-                        // for band in 0..6 { window.paint_quad(circle_quad(node_pos(band), r, color[band], selected)); }
+                        for (idx, (band_freq, band_gain)) in bands.iter().enumerate() {
+                            let pos = point(
+                                bounds.left() + px(freq_to_x(*band_freq, w)),
+                                bounds.top() + px(db_to_y(*band_gain, h, db_range)),
+                            );
+
+                            window.paint_quad(PaintQuad {
+                                bounds: Bounds::centered_at(pos, size(px(40.0), px(40.0))),
+                                corner_radii: (20.).into(),
+                                background: cx.theme().primary.alpha(0.25).into(),
+                                border_widths: (2.).into(),
+                                border_color: cx.theme().primary.into(),
+                                border_style: BorderStyle::default(),
+                            });
+
+                            let band_label = format!("{}", idx + 1);
+                            let band_label_line = window.text_system().shape_line(
+                                band_label.clone().into(),
+                                px(16.0),
+                                &[TextRun {
+                                    len: band_label.len(),
+                                    font: Font::default().bold(),
+                                    color: cx.theme().foreground,
+                                    background_color: None,
+                                    underline: None,
+                                    strikethrough: None,
+                                }],
+                                None,
+                            );
+                            _ = band_label_line.paint(
+                                pos,
+                                px(1.0),
+                                TextAlign::Center,
+                                Some(px(0.)),
+                                window,
+                                cx,
+                            );
+                        }
                     },
                 )
-                .size_full()
+                .size_full(),
             )
     }
 }
