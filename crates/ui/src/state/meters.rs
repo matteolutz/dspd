@@ -51,14 +51,17 @@ impl MetersState {
         }
 
         let mut updated_meters = Vec::new();
-        for (idx, meter) in self.meters.iter_mut().enumerate() {
-            let value = values[meter.slot];
-
-            if meter.value.is_some_and(|old_value| old_value == value) {
+        for (idx, (new_value, meter)) in self
+            .meters
+            .iter_mut()
+            .map(|meter| (values[meter.slot], meter))
+            .enumerate()
+        {
+            if meter.value.is_some_and(|old_value| old_value == new_value) {
                 continue;
             }
 
-            meter.value = Some(value);
+            meter.value = Some(new_value);
             updated_meters.push(idx);
         }
 
