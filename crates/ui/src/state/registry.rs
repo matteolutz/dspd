@@ -41,6 +41,12 @@ pub struct PluginDescriptor {
     pub params: Vec<ParamDef>,
 }
 
+impl PluginDescriptor {
+    pub fn find_param(&self, id: u32) -> Option<&ParamDef> {
+        self.params.iter().find(|p| p.id == id)
+    }
+}
+
 #[derive(serde::Deserialize)]
 pub struct SerializableRegistry {
     plugins: Vec<PluginDescriptor>,

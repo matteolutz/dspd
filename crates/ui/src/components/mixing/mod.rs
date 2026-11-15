@@ -67,8 +67,17 @@ impl<T: 'static> MixingComponentValue<T> {
     }
 
     pub fn set_local_value(&mut self, value: T, cx: &mut Context<Self>) {
+        let was_updating = self.is_updating;
+        if !was_updating {
+            self.start_updating();
+        }
+
         self.local = Some(value);
         cx.notify();
+
+        if !was_updating {
+            self.stop_updating();
+        }
     }
 
     pub fn update_local_value<R>(
@@ -79,9 +88,19 @@ impl<T: 'static> MixingComponentValue<T> {
     where
         T: Clone,
     {
+        let was_updating = self.is_updating;
+        if !was_updating {
+            self.start_updating();
+        }
+
         let current_value = self.local.get_or_insert_with(|| self.remote.clone());
         let result = update(current_value, cx);
         cx.notify();
+
+        if !was_updating {
+            self.stop_updating();
+        }
+
         result
     }
 

@@ -1,4 +1,7 @@
-use std::rc::Rc;
+use std::{
+    any::{Any, TypeId},
+    rc::Rc,
+};
 
 use dspd_api::ParamUnit;
 use gpui_kit::{
@@ -7,10 +10,10 @@ use gpui_kit::{
     component::{input::Input, ActiveTheme},
     div,
     prelude::FluentBuilder,
-    px, rems, AbsoluteLength, Anchor, App, AppContext, ClickEvent, Context, DispatchPhase, Entity,
-    EventEmitter, Focusable, InteractiveElement, KeyDownEvent, MouseMoveEvent, ParentElement,
-    PathBuilder, Pixels, Point, Render, StatefulInteractiveElement, Styled, Subscription, TextRun,
-    Window,
+    px, rems, AbsoluteLength, Anchor, AnyEntity, App, AppContext, ClickEvent, Context,
+    DispatchPhase, Entity, EventEmitter, Focusable, InteractiveElement, KeyDownEvent,
+    MouseMoveEvent, ParentElement, PathBuilder, Pixels, Point, Render, StatefulInteractiveElement,
+    Styled, Subscription, TextRun, Window,
 };
 
 use crate::{
@@ -127,8 +130,162 @@ impl KnobValueFormatter {
     }
 }
 
+pub enum KnobValue {
+    Remote(Entity<MixingComponentValue<f32>>),
+    Derived {
+        entity: AnyEntity,
+        getter: Box<dyn Fn(&App) -> f32>,
+        setter: Box<dyn Fn(f32, &mut App)>,
+        start_updating: Box<dyn Fn(&mut App)>,
+        stop_updating: Box<dyn Fn(&mut App)>,
+    },
+    Local(f32),
+}
+
+impl KnobValue {
+    pub fn derived<T>(
+        value: &Entity<MixingComponentValue<T>>,
+        getter: impl Fn(&T, &App) -> f32 + 'static,
+        setter: impl Fn(&mut T, f32, &mut App) + 'static,
+    ) -> Self
+    where
+        T: Clone + 'static,
+    {
+        let entity = value.clone().into_any();
+
+        let getter = Box::new({
+            let entity = entity.clone();
+            move |cx: &App| {
+                let value = entity
+                    .clone()
+                    .downcast::<MixingComponentValue<T>>()
+                    .expect("Failed to downcast entity to MixingComponentValue<T>");
+                let value = value.read(cx);
+                getter(value.display_value(), cx)
+            }
+        });
+
+        let setter = Box::new({
+            let entity = entity.clone();
+            move |new_value: f32, cx: &mut App| {
+                let value = entity
+                    .clone()
+                    .downcast::<MixingComponentValue<T>>()
+                    .expect("Failed to downcast entity to MixingComponentValue<T>");
+                value.update(cx, |mv, cx| {
+                    mv.update_local_value(cx, |value, cx| {
+                        setter(value, new_value, cx);
+                    });
+                });
+            }
+        });
+
+        let start_updating = Box::new({
+            let entity = entity.clone();
+            move |cx: &mut App| {
+                let value = entity
+                    .clone()
+                    .downcast::<MixingComponentValue<T>>()
+                    .expect("Failed to downcast entity to MixingComponentValue<T>");
+                value.update(cx, |mv, _| mv.start_updating());
+            }
+        });
+
+        let stop_updating = Box::new({
+            let entity = entity.clone();
+            move |cx: &mut App| {
+                let value = entity
+                    .clone()
+                    .downcast::<MixingComponentValue<T>>()
+                    .expect("Failed to downcast entity to MixingComponentValue<T>");
+                value.update(cx, |mv, _| mv.stop_updating());
+            }
+        });
+
+        Self::Derived {
+            entity: value.clone().into_any(),
+            getter,
+            setter,
+            start_updating,
+            stop_updating,
+        }
+    }
+}
+
+impl From<Entity<MixingComponentValue<f32>>> for KnobValue {
+    fn from(entity: Entity<MixingComponentValue<f32>>) -> Self {
+        KnobValue::Remote(entity)
+    }
+}
+
+impl KnobValue {
+    pub fn entity(&self) -> Option<&AnyEntity> {
+        match self {
+            KnobValue::Remote(entity) => Some(entity),
+            KnobValue::Derived { entity, .. } => Some(entity),
+            KnobValue::Local(_) => None,
+        }
+    }
+
+    pub fn start_updating(&mut self, cx: &mut App) {
+        match self {
+            KnobValue::Remote(entity) => entity.update(cx, |value, _| value.start_updating()),
+            KnobValue::Derived { start_updating, .. } => start_updating(cx),
+            _ => {}
+        }
+    }
+
+    pub fn stop_updating(&mut self, cx: &mut App) {
+        match self {
+            KnobValue::Remote(entity) => entity.update(cx, |value, _| value.stop_updating()),
+            KnobValue::Derived { stop_updating, .. } => stop_updating(cx),
+            _ => {}
+        }
+    }
+
+    pub fn display_value(&self, cx: &App) -> f32 {
+        match self {
+            KnobValue::Remote(entity) => *entity.read(cx).display_value(),
+            KnobValue::Derived { getter, .. } => {
+                let value = getter(cx);
+                value
+            }
+            KnobValue::Local(value) => *value,
+        }
+    }
+
+    pub fn set_local_value(&mut self, value: f32, cx: &mut App) {
+        match self {
+            KnobValue::Remote(entity) => entity.update(cx, |mv, cx| mv.set_local_value(value, cx)),
+            KnobValue::Derived { setter, .. } => {
+                setter(value, cx);
+            }
+            KnobValue::Local(local_value) => *local_value = value,
+        }
+    }
+
+    pub fn update_local_value<R>(
+        &mut self,
+        cx: &mut App,
+        update: impl FnOnce(&mut f32, &mut App) -> R,
+    ) -> R {
+        match self {
+            KnobValue::Remote(entity) => {
+                entity.update(cx, |mv, cx| mv.update_local_value(cx, update))
+            }
+            KnobValue::Derived { setter, getter, .. } => {
+                let mut value = getter(cx);
+                let result = update(&mut value, cx);
+                setter(value, cx);
+                result
+            }
+            KnobValue::Local(local_value) => update(local_value, cx),
+        }
+    }
+}
+
 pub struct Knob {
-    value: Entity<MixingComponentValue<f32>>,
+    value: KnobValue,
     state: KnobState,
 
     text_input: Entity<InputState>,
@@ -154,13 +311,47 @@ impl Knob {
                 .default_value(value_formatter.text_input_value(*value.read(cx).display_value()))
         });
 
-        let _subs = vec![cx.observe_in(&value, window, |this, _, window, cx| {
+        let mut _subs = vec![cx.observe_in(&value, window, |this, _, window, cx| {
             this.update_text_input(window, cx);
             cx.notify();
         })];
 
         Self {
-            value,
+            value: KnobValue::Remote(value),
+            state: KnobState::default(),
+            on_double_click: None,
+            value_formatter,
+            default_value: None,
+            text_input,
+            _subs,
+        }
+    }
+
+    pub fn new_derived<T>(
+        value: &Entity<MixingComponentValue<T>>,
+        getter: impl Fn(&T, &App) -> f32 + 'static,
+        setter: impl Fn(&mut T, f32, &mut App) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self
+    where
+        T: Clone + 'static,
+    {
+        let knob_value = KnobValue::derived(&value, getter, setter);
+        let value_formatter = KnobValueFormatter::default();
+
+        let text_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(value_formatter.text_input_value(knob_value.display_value(cx)))
+        });
+
+        let mut _subs = vec![cx.observe_in(&value, window, |this, _, window, cx| {
+            this.update_text_input(window, cx);
+            cx.notify();
+        })];
+
+        Self {
+            value: knob_value,
             state: KnobState::default(),
             on_double_click: None,
             value_formatter,
@@ -216,11 +407,16 @@ impl Knob {
         self
     }
 
+    pub fn set_local_value(&mut self, value: f32, window: &mut Window, cx: &mut Context<Self>) {
+        self.value.set_local_value(value, cx);
+        self.update_text_input(window, cx);
+    }
+
     fn update_text_input(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.text_input.update(cx, |input, cx| {
             input.set_value(
                 self.value_formatter
-                    .text_input_value(*self.value.read(cx).display_value()),
+                    .text_input_value(self.value.display_value(cx)),
                 window,
                 cx,
             );
@@ -234,7 +430,7 @@ impl Knob {
         cx: &mut gpui_kit::prelude::Context<Self>,
     ) {
         self.state = KnobState::MouseDown(event.position);
-        self.value.update(cx, |value, _| value.start_updating());
+        self.value.start_updating(cx);
         cx.emit(KnobEvent::MouseDown);
     }
 
@@ -251,12 +447,12 @@ impl Knob {
     /// Helper function to stop editing the knob, resetting its state and stopping any value updates.
     fn stop_editing(&mut self, cx: &mut Context<Self>) {
         self.state = KnobState::Default;
-        self.value.update(cx, |value, _| value.stop_updating());
+        self.value.stop_updating(cx);
     }
 
     fn formatted_display_value(&self, cx: &App) -> String {
-        let value = self.value.read(cx).display_value();
-        self.value_formatter.format(*value)
+        let value = self.value.display_value(cx);
+        self.value_formatter.format(value)
     }
 
     fn get_text_width(
@@ -283,11 +479,11 @@ impl Render for Knob {
         window: &mut gpui_kit::Window,
         cx: &mut gpui_kit::prelude::Context<Self>,
     ) -> impl gpui_kit::prelude::IntoElement {
-        let value = self.value.read(cx).display_value();
+        let value = self.value.display_value(cx);
 
         let is_default = self
             .default_value
-            .is_some_and(|default_value| *value == default_value);
+            .is_some_and(|default_value| value == default_value);
 
         let rotation = (value * 270.0) - 225.0;
 
@@ -305,11 +501,7 @@ impl Render for Knob {
                         .value_formatter
                         .parse_text_input_value(this.text_input.read(cx).value().as_str())
                     {
-                        this.value.update(cx, |value, cx| {
-                            value.start_updating();
-                            value.set_local_value(input_value, cx);
-                            value.stop_updating();
-                        });
+                        this.value.set_local_value(input_value, cx);
 
                         cx.notify();
                         cx.emit(KnobEvent::ValueChanged(input_value));
@@ -335,15 +527,9 @@ impl Render for Knob {
             }))
             .on_double_click(cx.listener(|this, _, _, cx| {
                 if let Some(handler) = this.on_double_click.as_ref() {
-                    let new_value = this.value.update(cx, |value, cx| {
-                        value.start_updating();
-                        let new_value = value.update_local_value(cx, |local, _| {
-                            handler(local);
-                            *local
-                        });
-                        value.stop_updating();
-
-                        new_value
+                    let new_value = this.value.update_local_value(cx, |local, cx| {
+                        handler(local);
+                        *local
                     });
 
                     cx.emit(KnobEvent::ValueChanged(new_value));
@@ -448,14 +634,13 @@ impl Render for Knob {
                                                 * MOUSE_SENSITIVITY
                                                 * if is_fine { 0.1 } else { 1.0 };
 
-                                            let new_value = this.value.update(cx, |mv, cx| {
-                                                mv.update_local_value(cx, |value, _| {
+                                            let new_value =
+                                                this.value.update_local_value(cx, |value, _| {
                                                     let new_value =
                                                         (*value - value_delta).clamp(0.0, 1.0);
                                                     *value = new_value;
                                                     new_value
-                                                })
-                                            });
+                                                });
 
                                             this.state.update_mouse_down_pos(event.position);
 

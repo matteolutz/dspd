@@ -183,7 +183,7 @@ impl RackTab {
         stages.map(|s| {
             s.map(|s| {
                 let editor: AnyView = match s.read(cx).id_str().to_string().as_str() {
-                    "dyn_eq" => cx.new(|cx| DynEqEditor::new(&s, cx)).into(),
+                    "dyn_eq" => cx.new(|cx| DynEqEditor::new(&s, window, cx)).into(),
                     _ => cx.new(|cx| GenericStageEditor::new(&s, window, cx)).into(),
                 };
 
