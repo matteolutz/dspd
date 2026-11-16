@@ -422,7 +422,7 @@ impl DynEqEditor {
             );
             let release_knob = DynEqKnob::new(
                 stage,
-                (band * 8 + 6) as u32,
+                (band * 8 + 7) as u32,
                 "Release",
                 &params,
                 |params| params.release_ms,
