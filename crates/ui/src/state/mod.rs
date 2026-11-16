@@ -23,7 +23,7 @@ pub use selection::*;
 
 pub mod tab;
 
-use gpui_kit::{App, AppContext, Entity, Global, Subscription, Task, WeakEntity};
+use gpui_kit::{App, AppContext, AsyncApp, Entity, Global, Subscription, Task};
 
 use crate::state::{registry::Registry, tab::UiTab};
 
@@ -45,8 +45,8 @@ pub struct UiState {
 }
 
 impl UiState {
-    pub fn client(cx: &App) -> &Arc<DspdHttpClient> {
-        &cx.global::<Self>().client
+    pub fn client(cx: &impl AppContext) -> Arc<DspdHttpClient> {
+        cx.read_global(|this: &Self, _| this.client.clone())
     }
 
     pub fn meters(cx: &App) -> Entity<MetersState> {
@@ -94,56 +94,52 @@ impl UiState {
 impl Global for UiState {}
 
 impl UiState {
-    fn get_session(
-        client: &DspdHttpClient,
-        meters: WeakEntity<MetersState>,
-        registry: WeakEntity<Registry>,
-        cx: &mut App,
-    ) -> Session {
-        let body = client
-            .get("/session")
-            .send()
-            .and_then(|res| res.text())
-            .expect("Failed to get session");
-        let session: SerializableSession =
-            serde_json::from_str(&body).expect("Failed to deserialize session");
-
-        Session::from_serializable(session, meters, registry, cx)
+    async fn get_session(client: &DspdHttpClient, cx: &impl AppContext) -> SerializableSession {
+        client.get_session(cx).await.expect("Failed to get session")
     }
 
-    fn get_registry(client: &DspdHttpClient) -> Registry {
-        let body = client
-            .get("/plugins")
-            .send()
-            .and_then(|res| res.text())
-            .expect("Failed to get plugin registry");
-
-        serde_json::from_str(&body).expect("Failed to deserialize plugin registry")
+    async fn get_registry(client: &DspdHttpClient, cx: &App) -> Registry {
+        client
+            .get_plugins(cx)
+            .await
+            .expect("Failed to get plugin registry")
     }
 
-    pub fn init(server_url: impl reqwest::IntoUrl, cx: &mut App) {
+    pub async fn init(server_url: impl reqwest::IntoUrl, cx: &mut App) {
         let server_url = server_url.into_url().expect("Failed to parse server URL");
         let client = Arc::new(DspdHttpClient::new(server_url.clone()));
 
         let meters = cx.new(|_| MetersState::default());
-        let registry = cx.new(|_| Self::get_registry(&client));
-        let session =
-            cx.new(|cx| Self::get_session(&client, meters.downgrade(), registry.downgrade(), cx));
+
+        let registry = Self::get_registry(&client, cx).await;
+        let registry = cx.new(|_| registry);
+
+        let session = Self::get_session(&client, cx).await;
+        let session = cx.new(|cx| {
+            Session::from_serializable(session, meters.downgrade(), registry.downgrade(), cx)
+        });
 
         let websocket = cx.new(|cx| WebSocket::start(&server_url, cx));
         let websocket_evt_sub = cx.subscribe(&websocket, |_, evt, cx| match evt {
             WebSocketEvent::EngineRestarted => {
-                let new_session = Self::get_session(
-                    &cx.global::<Self>().client.clone(),
-                    Self::meters(cx).downgrade(),
-                    Self::registry(cx).downgrade(),
-                    cx,
-                );
+                cx.spawn(async |cx: &mut AsyncApp| {
+                    let new_session = Self::get_session(&UiState::client(cx), cx).await;
 
-                Self::session(cx).update(cx, |session, cx| {
-                    *session = new_session;
-                    cx.notify();
-                });
+                    cx.update(|cx| {
+                        let new_session = Session::from_serializable(
+                            new_session,
+                            Self::meters(cx).downgrade(),
+                            Self::registry(cx).downgrade(),
+                            cx,
+                        );
+
+                        Self::session(cx).update(cx, |session, cx| {
+                            *session = new_session;
+                            cx.notify();
+                        });
+                    });
+                })
+                .detach();
             }
             WebSocketEvent::UpdateMeterInfos { meters } => {
                 Self::meters(cx).update(cx, |meter_state, cx| {

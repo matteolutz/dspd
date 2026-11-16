@@ -12,6 +12,6 @@ serde_json.workspace = true
 gpui-kit = "0.7.3"
 async-tungstenite = { version = "*", features = ["smol-runtime"] }
 futures-util = "0.3"
-reqwest = { version = "0.13.5", features = ["blocking"] }
+reqwest = { version = "0.13.5", features = ["blocking", "json"] }
 dspd-api.workspace = true
 itertools = "0.15.0"

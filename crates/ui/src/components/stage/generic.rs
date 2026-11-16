@@ -6,7 +6,6 @@ use gpui_kit::{
     AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled,
     Subscription, Window,
 };
-use serde_json::json;
 
 use crate::{
     components::{
@@ -14,7 +13,7 @@ use crate::{
         mixing::{Knob, KnobEvent, MixingComponentValue},
     },
     context::GpuiContextExtension,
-    state::{GetParamUnitScaling, MetersStateContextExt, RequestBuilderExt, Stage, UiState},
+    state::{GetParamUnitScaling, MetersStateContextExt, Stage, UiState},
 };
 
 struct GenericStageKnob {
@@ -128,23 +127,20 @@ impl GenericStageEditor {
                                 param.max as f32,
                             );
 
-                            match UiState::client(cx)
-                                .post("/params")
-                                .content_type_json()
-                                .body(
-                                    json!({
-                                        "strip": strip_idx,
-                                        "stage": stage_id,
-                                        "param_id": param.id,
-                                        "value": param_value
-                                    })
-                                    .to_string(),
-                                )
-                                .send()
-                            {
-                                Ok(_) => {}
-                                Err(e) => println!("knob failed: {}", e),
-                            }
+                            cx.spawn(async move |_, cx| {
+                                _ = UiState::client(cx)
+                                    .post_params(
+                                        crate::state::DspdParamsReq {
+                                            strip: strip_idx,
+                                            stage: stage_id,
+                                            param_id: param.id,
+                                            value: param_value,
+                                        },
+                                        cx,
+                                    )
+                                    .await;
+                            })
+                            .detach();
                         }
                         _ => {}
                     },

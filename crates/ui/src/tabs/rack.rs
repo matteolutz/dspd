@@ -14,14 +14,13 @@ use gpui_kit::{
     Styled, Subscription, Window,
 };
 use itertools::Itertools;
-use serde_json::json;
 
 use crate::{
     components::{
         ChannelStripColor, DynEqEditor, GenericStageEditor, ListPicker, ListPickerElement,
     },
     context::GpuiContextExtension,
-    state::{RequestBuilderExt, Stage, StripSelectionEvent, UiState},
+    state::{Stage, StripSelectionEvent, UiState},
     tabs::utils::{self, select_stage},
     window::WindowExt,
 };
@@ -366,13 +365,14 @@ impl Render for RackTab {
                                                                             return;
                                                                         }
 
-                                                                        match UiState::client(cx)
-                                                                            .delete(format!("/strips/{}/stages/{}", selected_strip_idx, stage_id))
-                                                                            .send()
-                                                                        {
-                                                                            Ok(res) => println!("res: {}", res.text().unwrap()),
-                                                                            Err(e) => println!("Failed to add stage: {}", e),
-                                                                        }
+                                                                        cx.spawn(async move |cx| {
+                                                                            _ = UiState::client(cx)
+                                                                                .remove_stage(
+                                                                                    selected_strip_idx,
+                                                                                    stage_id,
+                                                                                    cx
+                                                                                ).await;
+                                                                        }).detach();
                                                                     }
                                                                 );
                                                         }
@@ -394,24 +394,18 @@ impl Render for RackTab {
                                     .list_item_height(rems(3.0))
                                     .on_pick(move |entry, _, cx| {
                                         let stage_idx = idx + first_non_meter_stage_idx;
+                                        let stage_name = entry.id_str.to_string();
 
-                                        match UiState::client(cx)
-                                            .post(format!("/strips/{}/stages", selected_strip_idx))
-                                            .content_type_json()
-                                            .body(
-                                                json!({
-                                                    "index": stage_idx + 1,
-                                                    "stage": {
-                                                        "type": &entry.id_str
-                                                    }
-                                                })
-                                                .to_string(),
-                                            )
-                                            .send()
-                                        {
-                                            Ok(res) => println!("res: {}", res.text().unwrap()),
-                                            Err(e) => println!("Failed to add stage: {}", e),
-                                        }
+                                        cx.spawn(async move |cx| {
+                                            _ = UiState::client(cx)
+                                                .insert_stage(
+                                                    selected_strip_idx,
+                                                    stage_idx + 1,
+                                                    &stage_name,
+                                                    cx
+                                                ).await;
+                                        }).detach();
+//
                                     })
                                     .when_else(disabled,
                                         |this| this.text_color(cx.theme().muted_foreground),

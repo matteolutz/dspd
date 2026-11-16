@@ -27,21 +27,13 @@ impl EngineStats {
 
             async move |cx| loop {
                 let client = client.clone();
+                let stats = client.get_stats(cx).await;
 
-                let body: reqwest::Result<String> = cx
-                    .background_spawn(async move {
-                        // reqwest::blocking::get(stats_url).and_then(|res| res.text())
-                        client.get("/stats").send().and_then(|res| res.text())
-                    })
-                    .await;
-
-                if let Ok(body) = body {
-                    if let Ok(stats) = serde_json::from_str::<EngineStats>(&body) {
-                        cx.update_entity(&stats_entity, |this, cx| {
-                            *this = stats;
-                            cx.notify();
-                        })
-                    }
+                if let Ok(stats) = stats {
+                    cx.update_entity(&stats_entity, |this, cx| {
+                        *this = stats;
+                        cx.notify();
+                    });
                 }
 
                 cx.background_executor().timer(Duration::from_secs(1)).await;

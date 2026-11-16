@@ -12,6 +12,7 @@ use crate::state::{EngineStats, Session, UiState};
 mod components;
 mod context;
 mod hsla;
+// mod http;
 mod state;
 mod tabs;
 mod theme;
@@ -233,7 +234,7 @@ fn main() {
         components::init(cx);
         tabs::init(cx);
 
-        UiState::init("http://localhost:8080", cx);
+        gpui_kit::block_on(UiState::init("http://localhost:8080", cx));
 
         open_window(
             WindowOptions {

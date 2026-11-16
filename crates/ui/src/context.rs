@@ -1,6 +1,6 @@
 use gpui_kit::{
     point, px, App, AppContext, AsyncApp, Bounds, Context, Entity, EventEmitter, Pixels, Point,
-    Subscription, WeakEntity, Window,
+    Subscription, Task, WeakEntity, Window,
 };
 
 pub trait GpuiContextExtension<T> {
@@ -72,6 +72,43 @@ impl<'a, T: 'static> GpuiContextExtension<T> for Context<'a, T> {
             view.update(cx, |view, cx| f(view, bounds, c, window, cx))
                 .ok();
         }
+    }
+}
+
+pub trait SpawnContext {
+    fn spawn<AsyncFn, R>(&self, f: AsyncFn) -> Task<R>
+    where
+        AsyncFn: AsyncFnOnce(&mut AsyncApp) -> R + 'static,
+        R: 'static;
+}
+
+impl SpawnContext for App {
+    fn spawn<AsyncFn, R>(&self, f: AsyncFn) -> Task<R>
+    where
+        AsyncFn: AsyncFnOnce(&mut AsyncApp) -> R + 'static,
+        R: 'static,
+    {
+        App::spawn(&self, f)
+    }
+}
+
+impl<T: 'static> SpawnContext for Context<'_, T> {
+    fn spawn<AsyncFn, R>(&self, f: AsyncFn) -> Task<R>
+    where
+        AsyncFn: AsyncFnOnce(&mut AsyncApp) -> R + 'static,
+        R: 'static,
+    {
+        Context::spawn(&self, async move |_, app| f(app).await)
+    }
+}
+
+impl SpawnContext for AsyncApp {
+    fn spawn<AsyncFn, R>(&self, f: AsyncFn) -> Task<R>
+    where
+        AsyncFn: AsyncFnOnce(&mut AsyncApp) -> R + 'static,
+        R: 'static,
+    {
+        AsyncApp::spawn(&self, f)
     }
 }
 

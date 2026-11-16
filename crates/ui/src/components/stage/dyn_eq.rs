@@ -10,12 +10,11 @@ use gpui_kit::{
     Font, Hsla, InteractiveElement, MouseButton, MouseMoveEvent, ParentElement, PathBuilder,
     Pixels, Render, ScrollWheelEvent, SharedString, Styled, Subscription, Window,
 };
-use serde_json::json;
 
 use crate::{
     components::mixing::{Knob, KnobEvent, MixingComponentValue},
     context::GpuiContextExtension,
-    state::{GetParamUnitScaling, MetersStateContextExt, RequestBuilderExt, Stage, UiState},
+    state::{GetParamUnitScaling, MetersStateContextExt, Stage, UiState},
     window::WindowExt,
 };
 
@@ -245,23 +244,20 @@ impl DynEqKnob {
                 let value = param_unit.scaling().to_scaled(value, param_min, param_max);
                 // let value = map_range(value, 0.0, 1.0, param_min, param_max);
 
-                match UiState::client(cx)
-                    .post("/params")
-                    .content_type_json()
-                    .body(
-                        json!({
-                            "strip": strip_idx,
-                            "stage": stage_id,
-                            "param_id": param_id,
-                            "value": value
-                        })
-                        .to_string(),
-                    )
-                    .send()
-                {
-                    Ok(_) => {}
-                    Err(e) => println!("sending value failed: {}", e),
-                }
+                cx.spawn(async move |_, cx| {
+                    _ = UiState::client(cx)
+                        .post_params(
+                            crate::state::DspdParamsReq {
+                                strip: strip_idx,
+                                stage: stage_id,
+                                param_id,
+                                value,
+                            },
+                            cx,
+                        )
+                        .await;
+                })
+                .detach();
             }
             _ => {}
         })];
@@ -470,23 +466,20 @@ impl DynEqEditor {
             })
         });
 
-        match UiState::client(cx)
-            .post("/params")
-            .content_type_json()
-            .body(
-                json!({
-                    "strip": strip_idx,
-                    "stage": stage_id,
-                    "param_id": band * 8 + 1,
-                    "value": new_q
-                })
-                .to_string(),
-            )
-            .send()
-        {
-            Ok(_) => {}
-            Err(e) => println!("sending value failed: {}", e),
-        }
+        cx.spawn(async move |_, cx| {
+            _ = UiState::client(cx)
+                .post_params(
+                    crate::state::DspdParamsReq {
+                        strip: strip_idx,
+                        stage: stage_id,
+                        param_id: band as u32 * 8 + 1,
+                        value: new_q,
+                    },
+                    cx,
+                )
+                .await;
+        })
+        .detach();
 
         cx.notify();
     }
@@ -506,41 +499,32 @@ impl DynEqEditor {
             })
         });
 
-        match UiState::client(cx)
-            .post("/params")
-            .content_type_json()
-            .body(
-                json!({
-                    "strip": strip_idx,
-                    "stage": stage_id,
-                    "param_id": band * 8,
-                    "value": freq
-                })
-                .to_string(),
-            )
-            .send()
-        {
-            Ok(_) => {}
-            Err(e) => println!("sending value failed: {}", e),
-        }
+        cx.spawn(async move |_, cx| {
+            _ = UiState::client(cx)
+                .post_params(
+                    crate::state::DspdParamsReq {
+                        strip: strip_idx,
+                        stage: stage_id,
+                        param_id: band as u32 * 8,
+                        value: freq,
+                    },
+                    cx,
+                )
+                .await;
 
-        match UiState::client(cx)
-            .post("/params")
-            .content_type_json()
-            .body(
-                json!({
-                    "strip": strip_idx,
-                    "stage": stage_id,
-                    "param_id": band * 8 + 2,
-                    "value": gain
-                })
-                .to_string(),
-            )
-            .send()
-        {
-            Ok(_) => {}
-            Err(e) => println!("sending value failed: {}", e),
-        }
+            _ = UiState::client(cx)
+                .post_params(
+                    crate::state::DspdParamsReq {
+                        strip: strip_idx,
+                        stage: stage_id,
+                        param_id: band as u32 * 8 + 2,
+                        value: gain,
+                    },
+                    cx,
+                )
+                .await;
+        })
+        .detach();
 
         cx.notify();
     }
