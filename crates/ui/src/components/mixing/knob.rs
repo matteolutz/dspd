@@ -1,7 +1,4 @@
-use std::{
-    any::{Any, TypeId},
-    rc::Rc,
-};
+use std::rc::Rc;
 
 use dspd_api::ParamUnit;
 use gpui_kit::{
@@ -11,14 +8,16 @@ use gpui_kit::{
     div,
     prelude::FluentBuilder,
     px, rems, AbsoluteLength, Anchor, AnyEntity, App, AppContext, ClickEvent, Context,
-    DispatchPhase, Entity, EventEmitter, Focusable, InteractiveElement, KeyDownEvent,
+    DispatchPhase, Entity, EventEmitter, Focusable, Hsla, InteractiveElement, KeyDownEvent,
     MouseMoveEvent, ParentElement, PathBuilder, Pixels, Point, Render, StatefulInteractiveElement,
     Styled, Subscription, TextRun, Window,
 };
 
 use crate::{
-    components::mixing::MixingComponentValue, context::GpuiContextExtension,
-    state::ParamUnitToString, utils::map_range,
+    components::mixing::MixingComponentValue,
+    context::GpuiContextExtension,
+    state::{GetParamUnitScaling, ParamUnitToString},
+    utils::map_range,
 };
 
 const MOUSE_SENSITIVITY: f32 = 0.005;
@@ -105,12 +104,13 @@ impl KnobValueFormatter {
     pub fn text_input_value(&self, value: f32) -> String {
         match self {
             &KnobValueFormatter::UnitRange {
+                unit,
                 min,
                 max,
                 precision,
                 ..
             } => {
-                let scaled_value = map_range(value, 0.0, 1.0, min, max);
+                let scaled_value = unit.scaling().to_scaled(value, min, max);
                 format!("{:.prec$}", scaled_value, prec = precision)
             }
             KnobValueFormatter::Default | KnobValueFormatter::Custom(_) => format!("{:.2}", value),
@@ -119,10 +119,10 @@ impl KnobValueFormatter {
 
     pub fn parse_text_input_value(&self, input: &str) -> Option<f32> {
         match self {
-            &KnobValueFormatter::UnitRange { min, max, .. } => input
+            &KnobValueFormatter::UnitRange { unit, min, max, .. } => input
                 .parse::<f32>()
                 .ok()
-                .map(|val| map_range(val, min, max, 0.0, 1.0)),
+                .map(|val| unit.scaling().to_normalized(val, min, max)),
             KnobValueFormatter::Default | KnobValueFormatter::Custom(_) => {
                 input.parse::<f32>().ok().map(|val| val.clamp(0.0, 1.0))
             }
@@ -295,6 +295,10 @@ pub struct Knob {
 
     default_value: Option<f32>,
 
+    accent_color: Option<Hsla>,
+    size: Option<AbsoluteLength>,
+    inset: Option<AbsoluteLength>,
+
     _subs: Vec<Subscription>,
 }
 
@@ -323,6 +327,9 @@ impl Knob {
             value_formatter,
             default_value: None,
             text_input,
+            accent_color: None,
+            size: None,
+            inset: None,
             _subs,
         }
     }
@@ -357,6 +364,9 @@ impl Knob {
             value_formatter,
             default_value: None,
             text_input,
+            accent_color: None,
+            size: None,
+            inset: None,
             _subs,
         }
     }
@@ -404,6 +414,21 @@ impl Knob {
 
     pub fn with_default_value(mut self, default_value: f32) -> Self {
         self.default_value = Some(default_value);
+        self
+    }
+
+    pub fn with_accent_color(mut self, accent_color: impl Into<Hsla>) -> Self {
+        self.accent_color = Some(accent_color.into());
+        self
+    }
+
+    pub fn with_size(mut self, size: impl Into<AbsoluteLength>) -> Self {
+        self.size = Some(size.into());
+        self
+    }
+
+    pub fn with_inset(mut self, inset: impl Into<AbsoluteLength>) -> Self {
+        self.inset = Some(inset.into());
         self
     }
 
@@ -483,7 +508,13 @@ impl Render for Knob {
 
         let is_default = self
             .default_value
-            .is_some_and(|default_value| value == default_value);
+            .is_some_and(|default_value| (value - default_value).abs() <= f32::EPSILON);
+
+        let size = self.size.unwrap_or(rems(2.75).into());
+        let px_size = size.to_pixels(window.rem_size());
+
+        let inset = self.inset.unwrap_or(px(4.0).into());
+        let px_inset = inset.to_pixels(window.rem_size());
 
         let rotation = (value * 270.0) - 225.0;
 
@@ -537,9 +568,10 @@ impl Render for Knob {
                 }
             }))
             .flex_shrink_0()
-            .size_11()
+            // .size_11()
+            .size(px_size)
             .rounded_full()
-            .bg(cx.theme().border)
+            .bg(self.accent_color.unwrap_or(cx.theme().border))
             .flex()
             .justify_center()
             .items_center()
@@ -666,7 +698,7 @@ impl Render for Knob {
                         gpui_kit::MouseButton::Left,
                         cx.listener(Self::handle_left_mouse_up),
                     )
-                    .size_10()
+                    .size(px_size - px_inset)
                     .rounded_full()
                     .bg(cx.theme().background)
                     .border_3()

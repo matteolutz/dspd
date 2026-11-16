@@ -1,23 +1,22 @@
-use std::{f32::consts::PI, ops::Deref};
+use std::f32::consts::PI;
 
-use dspd_api::ParamUnit;
 use gpui_kit::{
     base::{InteractiveElementExt, StyledExt},
     canvas,
     component::ActiveTheme,
     div, fill, point,
     prelude::FluentBuilder,
-    px, size, Anchor, App, AppContext, Bounds, Context, CursorStyle, DispatchPhase, Entity, Hsla,
-    InteractiveElement, MouseButton, MouseMoveEvent, ParentElement, PathBuilder, Pixels, Render,
-    ScrollWheelEvent, Styled, Subscription, Window,
+    px, rems, size, Anchor, App, AppContext, Bounds, Context, CursorStyle, DispatchPhase, Entity,
+    Font, Hsla, InteractiveElement, MouseButton, MouseMoveEvent, ParentElement, PathBuilder,
+    Pixels, Render, ScrollWheelEvent, SharedString, Styled, Subscription, Window,
 };
 use serde_json::json;
 
 use crate::{
     components::mixing::{Knob, KnobEvent, MixingComponentValue},
     context::GpuiContextExtension,
-    state::{RequestBuilderExt, Stage, UiState},
-    utils::map_range,
+    state::{GetParamUnitScaling, MetersStateContextExt, RequestBuilderExt, Stage, UiState},
+    window::WindowExt,
 };
 
 const fn band_color(hue: f32) -> Hsla {
@@ -64,42 +63,71 @@ fn peaking_mag_db(f: f32, f0: f32, q: f32, gain_db: f32, fs: f32) -> f32 {
     20.0 * (num / den).log10()
 }
 
+struct DynEqCurvePoint {
+    freq: f32,
+    static_gain: f32,
+    range: f32,
+    gr: f32,
+}
+
 const N: usize = 256;
 
-fn curve_points(stage: &Entity<Stage>, fs: f32, cx: &App) -> Vec<(f32, f32)> {
-    let stage = stage.read(cx);
+fn curve_points(
+    bands: &[DynEqBand],
+    gain_reduction: &[f32],
+    fs: f32,
+    cx: &App,
+) -> Vec<DynEqCurvePoint> {
+    assert!(bands.len() == gain_reduction.len());
 
     // read each band once, not once per curve point
-    let bands: Vec<(f32, f32, f32)> = (0..6)
-        .map(|band| {
-            let base = band * 8;
-            let f0 = stage.get_param(base).unwrap_or(1000.0) as f32;
-            let q = stage.get_param(base + 1).unwrap_or(1.0) as f32;
-            let gain = stage.get_param(base + 2).unwrap_or(0.0) as f32;
-            (
-                f0.clamp(20.0, 20_000.0),
-                q.clamp(0.1, 18.0),
-                gain.clamp(-24.0, 24.0),
-            )
+    let band_values = bands
+        .iter()
+        .zip(gain_reduction)
+        .map(|(band, &gr)| {
+            let params = band.params.read(cx).display_value();
+            (params.freq, params.q, params.gain, params.range, gr)
         })
-        .collect();
+        .collect::<Vec<_>>();
 
     (0..N)
         .map(|i| {
             let t = i as f32 / (N - 1) as f32;
             let f = 20.0 * (20000.0f32 / 20.0).powf(t);
 
-            let mut total_db = 0.0;
-            for &(f0, q, gain) in &bands {
-                if gain.abs() < 1e-3 {
-                    continue; // flat band, contributes 0 dB
+            let mut total_static_gain = 0.0;
+            let mut total_range = 0.0;
+            let mut total_gr = 0.0;
+
+            for &(f0, q, static_gain, range, gr) in &band_values {
+                if static_gain.abs() >= 1e-3 {
+                    let db = peaking_mag_db(f, f0, q, static_gain, fs);
+                    if db.is_finite() {
+                        total_static_gain += db;
+                    }
                 }
-                let db = peaking_mag_db(f, f0, q, gain, fs);
-                if db.is_finite() {
-                    total_db += db;
+
+                if range.abs() >= 1e-3 {
+                    let db = peaking_mag_db(f, f0, q, range, fs);
+                    if db.is_finite() {
+                        total_range += db;
+                    }
+                }
+
+                if gr.abs() >= 1e-3 {
+                    let db = peaking_mag_db(f, f0, q, gr, fs);
+                    if db.is_finite() {
+                        total_gr += db;
+                    }
                 }
             }
-            (f, total_db)
+
+            DynEqCurvePoint {
+                freq: f,
+                static_gain: total_static_gain,
+                range: total_range,
+                gr: total_gr,
+            }
         })
         .collect()
 }
@@ -111,24 +139,51 @@ struct DynEqBandParams {
     freq: f32,
     q: f32,
     gain: f32,
+
+    threshold_db: f32,
+    ratio: f32,
+    range: f32,
+
+    attack_ms: f32,
+    release_ms: f32,
 }
 
 impl DynEqBandParams {
     fn from_stage(stage: &Stage, band: usize) -> Self {
         let base = (band * 8) as u32;
-        let freq = stage.get_param(base).unwrap_or(1000.0) as f32;
+        let freq = stage.get_param(base).unwrap_or_else(|| match band {
+            0 => 60.0,
+            1 => 180.0,
+            2 => 500.0,
+            3 => 1500.0,
+            4 => 4000.0,
+            5 => 10000.0,
+            _ => 1000.0,
+        }) as f32;
         let q = stage.get_param(base + 1).unwrap_or(1.0) as f32;
         let gain = stage.get_param(base + 2).unwrap_or(0.0) as f32;
+        let threshold_db = stage.get_param(base + 3).unwrap_or(0.0) as f32;
+        let ratio = stage.get_param(base + 4).unwrap_or(1.0) as f32;
+        let range = stage.get_param(base + 5).unwrap_or(0.0) as f32;
+        let attack_ms = stage.get_param(base + 6).unwrap_or(30.0) as f32;
+        let release_ms = stage.get_param(base + 7).unwrap_or(100.0) as f32;
+
         Self {
             freq: freq.clamp(20.0, 20_000.0),
             q: q.clamp(0.1, 18.0),
             gain: gain.clamp(-24.0, 24.0),
+            threshold_db: threshold_db.clamp(-90.0, 0.0),
+            ratio: ratio.clamp(1.0, 20.0),
+            range: range.clamp(-24.0, 24.0),
+            attack_ms: attack_ms.clamp(0.1, 500.0),
+            release_ms: release_ms.clamp(0.1, 2000.0),
         }
     }
 }
 
 struct DynEqKnob {
     knob: Entity<Knob>,
+    display_name: SharedString,
     _subs: Vec<Subscription>,
 }
 
@@ -136,6 +191,7 @@ impl DynEqKnob {
     pub fn new(
         stage: &Entity<Stage>,
         param_id: u32,
+        display_name: impl Into<SharedString>,
         params: &Entity<MixingComponentValue<DynEqBandParams>>,
         getter: impl Fn(&DynEqBandParams) -> f32 + 'static,
         setter: impl Fn(&mut DynEqBandParams, f32) + 'static,
@@ -151,19 +207,34 @@ impl DynEqKnob {
 
         let param_min = param.min as f32;
         let param_max = param.max as f32;
+        let param_default = param.default as f32;
         let param_unit = param.unit;
+        let band_color = BAND_COLORS[param_id as usize / 8];
 
         let knob = cx.new(move |cx| {
             Knob::new_derived(
                 &params,
-                move |params, _| map_range(getter(params), param_min, param_max, 0.0, 1.0),
+                move |params, _| {
+                    param_unit
+                        .scaling()
+                        .to_normalized(getter(params), param_min, param_max)
+                },
                 move |params, val, _| {
-                    setter(params, map_range(val, 0.0, 1.0, param_min, param_max))
+                    let val = param_unit.scaling().to_scaled(val, param_min, param_max);
+                    setter(params, val)
                 },
                 window,
                 cx,
             )
             .with_unit_range(param_unit, param_min, param_max, 1, window, cx)
+            .with_default_value(param_unit.scaling().to_normalized(
+                param_default,
+                param_min,
+                param_max,
+            ))
+            .with_accent_color(band_color)
+            .with_size(rems(4.0))
+            .with_inset(px(6.0))
         });
 
         let strip_idx = stage.read(cx).strip_idx();
@@ -171,7 +242,8 @@ impl DynEqKnob {
 
         let _subs = vec![cx.subscribe(&knob, move |_, _, evt, cx| match evt {
             &KnobEvent::ValueChanged(value) => {
-                let value = map_range(value, 0.0, 1.0, param_min, param_max);
+                let value = param_unit.scaling().to_scaled(value, param_min, param_max);
+                // let value = map_range(value, 0.0, 1.0, param_min, param_max);
 
                 match UiState::client(cx)
                     .post("/params")
@@ -194,7 +266,11 @@ impl DynEqKnob {
             _ => {}
         })];
 
-        Self { knob, _subs }
+        Self {
+            knob,
+            display_name: display_name.into(),
+            _subs,
+        }
     }
 }
 
@@ -207,11 +283,14 @@ pub struct DynEqEditor {
     stage: Entity<Stage>,
 
     bands: [DynEqBand; 6],
+    gain_reduction: [f32; 6],
 
     canvas_bounds: Option<Bounds<Pixels>>,
 
     dragged_band: Option<usize>,
     selected_band: Option<usize>,
+
+    _subs: Vec<Subscription>,
 }
 
 impl DynEqEditor {
@@ -225,13 +304,35 @@ impl DynEqEditor {
 
         let bands = Self::make_bands(stage, window, cx);
 
+        let _subs = vec![cx.subscribe_meter_values(
+            stage.read(cx).get_meter_slots(cx).collect::<Vec<_>>(),
+            |this, cx| {
+                let values = this
+                    .stage
+                    .read(cx)
+                    .get_meters(cx)
+                    .map(|(_, _, _, _, value)| value.unwrap_or(0.0))
+                    .collect::<Vec<_>>();
+
+                if let Ok(values) = values.try_into() {
+                    this.gain_reduction = values;
+                    cx.notify();
+                }
+            },
+        )];
+
         Self {
             stage: stage.clone(),
+
             bands,
+            gain_reduction: [0.0; 6],
+
             canvas_bounds: None,
 
             dragged_band: None,
             selected_band: None,
+
+            _subs,
         }
     }
 
@@ -252,6 +353,7 @@ impl DynEqEditor {
             let freq_knob = DynEqKnob::new(
                 stage,
                 (band * 8) as u32,
+                "Freq (Hz)",
                 &params,
                 |params| params.freq,
                 |params, freq| params.freq = freq,
@@ -261,6 +363,7 @@ impl DynEqEditor {
             let q_knob = DynEqKnob::new(
                 stage,
                 (band * 8 + 1) as u32,
+                "Q",
                 &params,
                 |params| params.q,
                 |params, q| params.q = q,
@@ -270,16 +373,76 @@ impl DynEqEditor {
             let gain_knob = DynEqKnob::new(
                 stage,
                 (band * 8 + 2) as u32,
+                "Gain",
                 &params,
                 |params| params.gain,
                 |params, gain| params.gain = gain,
                 window,
                 cx,
             );
+            let threshold_knob = DynEqKnob::new(
+                stage,
+                (band * 8 + 3) as u32,
+                "Threshold",
+                &params,
+                |params| params.threshold_db,
+                |params, threshold| params.threshold_db = threshold,
+                window,
+                cx,
+            );
+            let ratio_knob = DynEqKnob::new(
+                stage,
+                (band * 8 + 4) as u32,
+                "Ratio",
+                &params,
+                |params| params.ratio,
+                |params, ratio| params.ratio = ratio,
+                window,
+                cx,
+            );
+            let range_knob = DynEqKnob::new(
+                stage,
+                (band * 8 + 5) as u32,
+                "Range",
+                &params,
+                |params| params.range,
+                |params, range| params.range = range,
+                window,
+                cx,
+            );
+            let attack_knob = DynEqKnob::new(
+                stage,
+                (band * 8 + 6) as u32,
+                "Attack",
+                &params,
+                |params| params.attack_ms,
+                |params, attack| params.attack_ms = attack,
+                window,
+                cx,
+            );
+            let release_knob = DynEqKnob::new(
+                stage,
+                (band * 8 + 6) as u32,
+                "Release",
+                &params,
+                |params| params.release_ms,
+                |params, release| params.release_ms = release,
+                window,
+                cx,
+            );
 
             DynEqBand {
                 params,
-                knobs: vec![freq_knob, q_knob, gain_knob],
+                knobs: vec![
+                    freq_knob,
+                    q_knob,
+                    gain_knob,
+                    threshold_knob,
+                    ratio_knob,
+                    range_knob,
+                    attack_knob,
+                    release_knob,
+                ],
             }
         })
     }
@@ -399,7 +562,8 @@ impl Render for DynEqEditor {
         _window: &mut gpui_kit::Window,
         cx: &mut gpui_kit::prelude::Context<Self>,
     ) -> impl gpui_kit::prelude::IntoElement {
-        let points = curve_points(&self.stage, 48_000.0, cx);
+        // TODO: cache this
+        let points = curve_points(&self.bands, &self.gain_reduction, 48_000.0, cx);
 
         div()
             .size_full()
@@ -446,47 +610,117 @@ impl Render for DynEqEditor {
                                 window.paint_quad(fill(bounds, cx.theme().border));
                                 for f in [30., 50., 100., 200., 500., 1e3, 2e3, 5e3, 1e4] {
                                     let x = bounds.left() + px(freq_to_x(f, w));
+                                    let bounds = Bounds::from_anchor_and_size(
+                                        Anchor::TopLeft,
+                                        point(x, bounds.top()),
+                                        size(px(1.0), px(h)),
+                                    );
 
-                                    window.paint_quad(fill(
-                                        Bounds::from_anchor_and_size(
-                                            Anchor::TopLeft,
-                                            point(x, bounds.top()),
-                                            size(px(1.0), px(h)),
-                                        ),
-                                        cx.theme().secondary,
-                                    ));
+                                    window.paint_quad(fill(bounds, cx.theme().secondary));
+
+                                    let freq_text = if f < 1000.0 {
+                                        format!("{:.0}", f)
+                                    } else {
+                                        format!("{:.0}k", f / 1000.0)
+                                    };
+
+                                    window.paint_simple_text_line(
+                                        freq_text,
+                                        Font::default(),
+                                        px(10.0),
+                                        cx.theme().secondary_foreground,
+                                        bounds.bottom_right() + point(px(4.0), px(-16.0)),
+                                        gpui_kit::TextAlign::Left,
+                                        cx,
+                                    );
                                 }
 
                                 for db in [-18., -12., -6., 0., 6., 12., 18.] {
                                     let y = bounds.top() + px(db_to_y(db, h, DB_RANGE));
                                     let thickness = if db == 0.0 { 3.0 } else { 1.0 };
 
-                                    window.paint_quad(fill(
-                                        Bounds::from_anchor_and_size(
-                                            Anchor::TopLeft,
-                                            point(bounds.left(), y),
-                                            size(px(w), px(thickness)),
+                                    let bounds = Bounds::from_anchor_and_size(
+                                        Anchor::TopLeft,
+                                        point(bounds.left(), y),
+                                        size(px(w), px(thickness)),
+                                    );
+
+                                    window.paint_quad(fill(bounds, cx.theme().secondary));
+
+                                    window.paint_simple_text_line(
+                                        format!(
+                                            "{}{:.0}",
+                                            if db < 0.0 { "-" } else { "+" },
+                                            db.abs()
                                         ),
-                                        cx.theme().secondary,
-                                    ));
+                                        Font::default(),
+                                        px(10.0),
+                                        cx.theme().secondary_foreground,
+                                        bounds.left_center() + point(px(4.0), px(-10.0)),
+                                        gpui_kit::TextAlign::Left,
+                                        cx,
+                                    );
                                 }
 
                                 // total curve
-                                let mut pb = PathBuilder::stroke(px(2.0));
-                                for (i, &(f, db)) in points.iter().enumerate() {
-                                    let p = point(
-                                        bounds.left() + px(freq_to_x(f, w)),
-                                        bounds.top() + px(db_to_y(db, h, DB_RANGE)),
+                                let mut static_path_outline = PathBuilder::stroke(px(2.0));
+                                let mut static_path = PathBuilder::fill();
+                                let mut range_path = PathBuilder::stroke(px(2.0));
+                                let mut gr_path = PathBuilder::fill();
+
+                                for (i, eq_point) in points.iter().enumerate() {
+                                    let static_point = point(
+                                        bounds.left() + px(freq_to_x(eq_point.freq, w)),
+                                        bounds.top()
+                                            + px(db_to_y(eq_point.static_gain, h, DB_RANGE)),
                                     );
+
+                                    let range_point = point(
+                                        bounds.left() + px(freq_to_x(eq_point.freq, w)),
+                                        bounds.top() + px(db_to_y(eq_point.range, h, DB_RANGE)),
+                                    );
+
+                                    let gr_point = point(
+                                        bounds.left() + px(freq_to_x(eq_point.freq, w)),
+                                        bounds.top() + px(db_to_y(eq_point.gr, h, DB_RANGE)),
+                                    );
+
                                     if i == 0 {
-                                        pb.move_to(p)
+                                        static_path_outline.move_to(static_point);
+                                        static_path.move_to(static_point);
+                                        range_path.move_to(range_point);
+                                        gr_path.move_to(gr_point);
                                     } else {
-                                        pb.line_to(p)
+                                        static_path_outline.line_to(static_point);
+                                        static_path.line_to(static_point);
+                                        range_path.line_to(range_point);
+                                        gr_path.line_to(gr_point);
                                     }
                                 }
 
-                                if let Ok(path) = pb.build() {
+                                static_path.line_to(point(
+                                    bounds.left() + px(freq_to_x(20.0, w)),
+                                    bounds.top() + px(db_to_y(0.0, h, DB_RANGE)),
+                                ));
+                                gr_path.line_to(point(
+                                    bounds.left() + px(freq_to_x(20.0, w)),
+                                    bounds.top() + px(db_to_y(0.0, h, DB_RANGE)),
+                                ));
+
+                                if let Ok(path) = static_path_outline.build() {
                                     window.paint_path(path, cx.theme().primary);
+                                }
+
+                                if let Ok(path) = static_path.build() {
+                                    window.paint_path(path, cx.theme().primary.alpha(0.5));
+                                }
+
+                                if let Ok(path) = range_path.build() {
+                                    window.paint_path(path, cx.theme().yellow_light);
+                                }
+
+                                if let Ok(path) = gr_path.build() {
+                                    window.paint_path(path, cx.theme().yellow_light.alpha(0.5));
                                 }
                             }),
                         )
@@ -566,16 +800,28 @@ impl Render for DynEqEditor {
                         )
                     }),
             )
-            .child(div().w_full().flex_shrink_0().h_64().debug_red().when_some(
-                self.selected_band,
-                |this, selected_band| {
-                    this.children(
-                        self.bands[selected_band]
-                            .knobs
-                            .iter()
-                            .map(|k| k.knob.clone()),
-                    )
-                },
-            ))
+            .child(
+                div()
+                    .w_full()
+                    .flex_shrink_0()
+                    .h_64()
+                    .bg(cx.theme().background)
+                    .flex()
+                    .justify_center()
+                    .items_center()
+                    .gap_2()
+                    .when_some(self.selected_band, |this, selected_band| {
+                        this.children(self.bands[selected_band].knobs.iter().map(|k| {
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .gap_1()
+                                .w_20()
+                                .child(k.display_name.clone())
+                                .child(k.knob.clone())
+                        }))
+                    }),
+            )
     }
 }

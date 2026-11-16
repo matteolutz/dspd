@@ -408,6 +408,14 @@ impl Stage {
         }
     }
 
+    pub fn get_meter_slots<'a>(&self, cx: &'a App) -> impl Iterator<Item = usize> + 'a {
+        self.meters
+            .upgrade()
+            .expect("MetersState entity has been dropped")
+            .read(cx)
+            .meter_slots_for_stage(self.strip_idx, self.stage_id)
+    }
+
     pub fn get_meters<'a>(
         &self,
         cx: &'a App,

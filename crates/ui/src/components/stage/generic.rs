@@ -14,8 +14,7 @@ use crate::{
         mixing::{Knob, KnobEvent, MixingComponentValue},
     },
     context::GpuiContextExtension,
-    state::{MetersStateContextExt, RequestBuilderExt, Stage, UiState},
-    utils::map_range,
+    state::{GetParamUnitScaling, MetersStateContextExt, RequestBuilderExt, Stage, UiState},
 };
 
 struct GenericStageKnob {
@@ -81,12 +80,10 @@ impl GenericStageEditor {
                         stage,
                         move |s| {
                             let param_value = s.get_param(param.id).unwrap_or(param.default) as f32;
-                            let knob_value = map_range(
+                            let knob_value = param.unit.scaling().to_normalized(
                                 param_value,
                                 param.min as f32,
                                 param.max as f32,
-                                0.0,
-                                1.0,
                             );
                             knob_value
                         },
@@ -97,12 +94,10 @@ impl GenericStageEditor {
                 let knob = cx.new(|cx| {
                     Knob::new(value, window, cx)
                         .on_double_click(move |val| {
-                            *val = map_range(
+                            *val = param.unit.scaling().to_normalized(
                                 param.default as f32,
                                 param.min as f32,
                                 param.max as f32,
-                                0.0,
-                                1.0,
                             );
                         })
                         .with_unit_range(
@@ -113,12 +108,10 @@ impl GenericStageEditor {
                             window,
                             cx,
                         )
-                        .with_default_value(map_range(
+                        .with_default_value(param.unit.scaling().to_normalized(
                             param.default as f32,
                             param.min as f32,
                             param.max as f32,
-                            0.0,
-                            1.0,
                         ))
                 });
 
@@ -129,8 +122,11 @@ impl GenericStageEditor {
                         KnobEvent::ValueChanged(value) => {
                             let strip_idx = stage.read(cx).strip_idx();
                             let stage_id = stage.read(cx).stage_id();
-                            let param_value =
-                                map_range(*value, 0.0, 1.0, param.min as f32, param.max as f32);
+                            let param_value = param.unit.scaling().to_scaled(
+                                *value,
+                                param.min as f32,
+                                param.max as f32,
+                            );
 
                             match UiState::client(cx)
                                 .post("/params")
