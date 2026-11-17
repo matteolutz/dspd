@@ -8,6 +8,8 @@ use std::{
     time::Duration,
 };
 
+pub type JackAudioDeviceId = (String, String);
+
 pub struct JackAudioDevice {
     client: String,
     name: String,
@@ -215,7 +217,7 @@ pub(super) trait JackClientPatchExt {
     fn get_devices(
         &self,
         flags: jack::PortFlags,
-    ) -> anyhow::Result<(Vec<JackAudioDevice>, HashMap<(String, String), usize>)>;
+    ) -> anyhow::Result<(Vec<JackAudioDevice>, HashMap<JackAudioDeviceId, usize>)>;
 
     fn handle_patch_command(
         &self,
@@ -228,7 +230,7 @@ impl JackClientPatchExt for jack::Client {
     fn get_devices(
         &self,
         flags: jack::PortFlags,
-    ) -> anyhow::Result<(Vec<JackAudioDevice>, HashMap<(String, String), usize>)> {
+    ) -> anyhow::Result<(Vec<JackAudioDevice>, HashMap<JackAudioDeviceId, usize>)> {
         let mut devices: Vec<JackAudioDevice> = Vec::new();
         let mut index: HashMap<(String, String), usize> = HashMap::new();
 
