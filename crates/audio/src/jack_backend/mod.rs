@@ -2,6 +2,7 @@ use std::{
     ops::{Deref, DerefMut},
     sync::{
         atomic::{AtomicU64, Ordering},
+        mpsc::{self, Receiver, Sender},
         Arc,
     },
     time::Duration,
@@ -9,8 +10,9 @@ use std::{
 
 use dspd_engine::{AudioBlock, BoxedProcessor};
 use jack::contrib::controller::ControlledProcessorTrait;
+use jack::PortSpec;
 
-use crate::{AudioBackend, RunReport};
+use crate::{AudioBackend, AudioPatching, PatchState, RunReport};
 
 mod daemon;
 pub use daemon::*;
@@ -35,6 +37,42 @@ pub struct JackBackend {
     sample_rate: u32,
 
     daemon: Option<JackDaemon>,
+    patching: Arc<JackPatching>,
+    patch_commands: Option<Receiver<JackPatchCommand>>,
+}
+
+enum JackPatchCommand {
+    ConnectInput {
+        source: String,
+        input: usize,
+        result: Sender<anyhow::Result<()>>,
+    },
+    ConnectOutput {
+        output: usize,
+        destination: String,
+        result: Sender<anyhow::Result<()>>,
+    },
+    DisconnectInput {
+        input: usize,
+        result: Sender<anyhow::Result<()>>,
+    },
+    DisconnectOutput {
+        output: usize,
+        result: Sender<anyhow::Result<()>>,
+    },
+    CurrentPatch {
+        result: Sender<anyhow::Result<PatchState>>,
+    },
+    CaptureDevices {
+        result: Sender<anyhow::Result<Vec<String>>>,
+    },
+    PlaybackDevices {
+        result: Sender<anyhow::Result<Vec<String>>>,
+    },
+}
+
+pub struct JackPatching {
+    commands: Sender<JackPatchCommand>,
 }
 
 impl JackBackend {
@@ -60,6 +98,8 @@ impl JackBackend {
             })?);
         }
 
+        let (command_sender, command_receiver) = mpsc::channel();
+
         Ok(Self {
             in_channels,
             out_channels,
@@ -67,7 +107,98 @@ impl JackBackend {
             max_block_size,
             sample_rate,
             daemon,
+            patching: Arc::new(JackPatching {
+                commands: command_sender,
+            }),
+            patch_commands: Some(command_receiver),
         })
+    }
+}
+
+impl JackPatching {
+    fn request<T>(
+        &self,
+        command: impl FnOnce(Sender<anyhow::Result<T>>) -> JackPatchCommand,
+    ) -> anyhow::Result<T> {
+        let (result_sender, result_receiver) = mpsc::channel();
+        self.commands
+            .send(command(result_sender))
+            .map_err(|_| anyhow::anyhow!("JACK backend is not running"))?;
+        result_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .map_err(|_| anyhow::anyhow!("timed out waiting for the JACK backend"))?
+    }
+
+    pub fn connect_input(&self, source: &str, input: usize) -> anyhow::Result<()> {
+        if source.is_empty() {
+            anyhow::bail!("JACK source port name must not be empty");
+        }
+        self.request(|result| JackPatchCommand::ConnectInput {
+            source: source.into(),
+            input,
+            result,
+        })
+    }
+
+    pub fn connect_output(&self, output: usize, destination: &str) -> anyhow::Result<()> {
+        if destination.is_empty() {
+            anyhow::bail!("JACK destination port name must not be empty");
+        }
+        self.request(|result| JackPatchCommand::ConnectOutput {
+            output,
+            destination: destination.into(),
+            result,
+        })
+    }
+
+    pub fn disconnect_input(&self, input: usize) -> anyhow::Result<()> {
+        self.request(|result| JackPatchCommand::DisconnectInput { input, result })
+    }
+
+    pub fn disconnect_output(&self, output: usize) -> anyhow::Result<()> {
+        self.request(|result| JackPatchCommand::DisconnectOutput { output, result })
+    }
+
+    pub fn current_patch(&self) -> anyhow::Result<PatchState> {
+        self.request(|result| JackPatchCommand::CurrentPatch { result })
+    }
+
+    pub fn capture_devices(&self) -> anyhow::Result<Vec<String>> {
+        self.request(|result| JackPatchCommand::CaptureDevices { result })
+    }
+
+    pub fn playback_devices(&self) -> anyhow::Result<Vec<String>> {
+        self.request(|result| JackPatchCommand::PlaybackDevices { result })
+    }
+}
+
+impl AudioPatching for JackPatching {
+    fn connect_input(&self, source: &str, input: usize) -> anyhow::Result<()> {
+        self.connect_input(source, input)
+    }
+
+    fn connect_output(&self, output: usize, destination: &str) -> anyhow::Result<()> {
+        self.connect_output(output, destination)
+    }
+
+    fn disconnect_input(&self, input: usize) -> anyhow::Result<()> {
+        self.disconnect_input(input)
+    }
+
+    fn disconnect_output(&self, output: usize) -> anyhow::Result<()> {
+        self.disconnect_output(output)
+    }
+
+    fn current_patch(&self) -> anyhow::Result<PatchState> {
+        self.current_patch()
+    }
+
+    fn capture_devices(&self) -> anyhow::Result<Vec<String>> {
+        self.capture_devices()
+    }
+
+    fn playback_devices(&self) -> anyhow::Result<Vec<String>> {
+        self.playback_devices()
     }
 }
 
@@ -167,14 +298,177 @@ impl jack::contrib::controller::ControlledProcessorTrait for DspdProcessorWrappe
     }
 }
 
+fn dsp_port_name(client_name: &str, direction: &str, index: usize) -> String {
+    format!("{client_name}:{direction}_{index}")
+}
+
+fn disconnect_all(client: &jack::Client, port_name: &str) -> anyhow::Result<()> {
+    let Some(port) = client.port_by_name(port_name) else {
+        anyhow::bail!("JACK port {port_name} does not exist");
+    };
+    for connected in port.get_connections() {
+        client
+            .disconnect_ports_by_name(&connected, port_name)
+            .map_err(|error| anyhow::anyhow!("disconnecting JACK ports: {error}"))?;
+    }
+    Ok(())
+}
+
+fn connect_input(
+    client: &jack::Client,
+    client_name: &str,
+    source: &str,
+    input: usize,
+    input_count: usize,
+) -> anyhow::Result<()> {
+    if input >= input_count {
+        anyhow::bail!("JACK input index {input} is out of range");
+    }
+    let destination = dsp_port_name(client_name, "input", input);
+    disconnect_all(client, &destination)?;
+    client
+        .connect_ports_by_name(source, &destination)
+        .map_err(|error| anyhow::anyhow!("connecting JACK port {source} -> {destination}: {error}"))
+}
+
+fn connect_output(
+    client: &jack::Client,
+    client_name: &str,
+    output: usize,
+    destination: &str,
+    output_count: usize,
+) -> anyhow::Result<()> {
+    if output >= output_count {
+        anyhow::bail!("JACK output index {output} is out of range");
+    }
+    let source = dsp_port_name(client_name, "output", output);
+    disconnect_all(client, &source)?;
+    client
+        .connect_ports_by_name(&source, destination)
+        .map_err(|error| anyhow::anyhow!("connecting JACK port {source} -> {destination}: {error}"))
+}
+
+fn external_ports(client: &jack::Client, flags: jack::PortFlags) -> Vec<String> {
+    let owned_prefix = format!("{}:", client.name());
+    client
+        .ports(None, Some(jack::AudioIn::default().jack_port_type()), flags)
+        .into_iter()
+        .filter(|name| !name.starts_with(&owned_prefix))
+        .collect()
+}
+
+fn current_patch(
+    client: &jack::Client,
+    client_name: &str,
+    input_count: usize,
+    output_count: usize,
+) -> PatchState {
+    let owned_prefix = format!("{client_name}:");
+    let connections = |direction: &str, count: usize| {
+        (0..count)
+            .map(|index| {
+                let name = dsp_port_name(client_name, direction, index);
+                client.port_by_name(&name).and_then(|port| {
+                    port.get_connections()
+                        .into_iter()
+                        .find(|name| !name.starts_with(&owned_prefix))
+                })
+            })
+            .collect()
+    };
+
+    PatchState {
+        inputs: connections("input", input_count),
+        outputs: connections("output", output_count),
+    }
+}
+
+fn handle_patch_command(
+    client: &jack::Client,
+    client_name: &str,
+    input_count: usize,
+    output_count: usize,
+    command: JackPatchCommand,
+) {
+    match command {
+        JackPatchCommand::ConnectInput {
+            source,
+            input,
+            result,
+        } => {
+            let _ = result.send(connect_input(
+                client,
+                client_name,
+                &source,
+                input,
+                input_count,
+            ));
+        }
+        JackPatchCommand::ConnectOutput {
+            output,
+            destination,
+            result,
+        } => {
+            let _ = result.send(connect_output(
+                client,
+                client_name,
+                output,
+                &destination,
+                output_count,
+            ));
+        }
+        JackPatchCommand::DisconnectInput { input, result } => {
+            let outcome = if input < input_count {
+                disconnect_all(client, &dsp_port_name(client_name, "input", input))
+            } else {
+                Err(anyhow::anyhow!("JACK input index {input} is out of range"))
+            };
+            let _ = result.send(outcome);
+        }
+        JackPatchCommand::DisconnectOutput { output, result } => {
+            let outcome = if output < output_count {
+                disconnect_all(client, &dsp_port_name(client_name, "output", output))
+            } else {
+                Err(anyhow::anyhow!(
+                    "JACK output index {output} is out of range"
+                ))
+            };
+            let _ = result.send(outcome);
+        }
+        JackPatchCommand::CurrentPatch { result } => {
+            let _ = result.send(Ok(current_patch(
+                client,
+                client_name,
+                input_count,
+                output_count,
+            )));
+        }
+        JackPatchCommand::CaptureDevices { result } => {
+            let _ = result.send(Ok(external_ports(client, jack::PortFlags::IS_OUTPUT)));
+        }
+        JackPatchCommand::PlaybackDevices { result } => {
+            let _ = result.send(Ok(external_ports(client, jack::PortFlags::IS_INPUT)));
+        }
+    }
+}
+
 impl AudioBackend for JackBackend {
+    fn patching(&self) -> Option<Arc<dyn AudioPatching>> {
+        Some(Arc::clone(&self.patching) as Arc<dyn AudioPatching>)
+    }
+
     fn run(
         &mut self,
         processor: Box<dyn dspd_engine::Processor + Send>,
         stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> anyhow::Result<crate::RunReport> {
         let started = std::time::Instant::now();
+        let patch_commands = self
+            .patch_commands
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("JACK backend cannot be run more than once"))?;
         let (client, _) = jack::Client::new("dspd", jack::ClientOptions::default())?;
+        let client_name = client.name().to_owned();
 
         client.set_buffer_size(self.block_size as u32)?;
         if client.sample_rate() != self.sample_rate {
@@ -220,7 +514,7 @@ impl AudioBackend for JackBackend {
             output,
 
             frames_count: frames_count.clone(),
-            block_count: frames_count.clone(),
+            block_count: block_count.clone(),
         };
 
         let (processor_instance, mut handle) = processor_wrapper.instance(16, 16);
@@ -228,6 +522,15 @@ impl AudioBackend for JackBackend {
         let active_client = client.activate_async((), processor_instance)?;
 
         while !stop.load(Ordering::Relaxed) {
+            while let Ok(command) = patch_commands.try_recv() {
+                handle_patch_command(
+                    active_client.as_client(),
+                    &client_name,
+                    self.in_channels,
+                    self.out_channels,
+                    command,
+                );
+            }
             for _notification in handle.drain_notifications() {}
 
             std::thread::sleep(Duration::from_millis(50));
