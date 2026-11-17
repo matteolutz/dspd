@@ -2,6 +2,7 @@ use dspd_engine::{AudioDevice, AudioPatching, PatchState};
 
 use crate::jack_backend::{dspd_input_port_name, dspd_output_port_name};
 use std::{
+    borrow::Cow,
     collections::HashMap,
     sync::{mpsc, Arc},
     time::Duration,
@@ -15,8 +16,8 @@ pub struct JackAudioDevice {
 }
 
 impl AudioDevice for JackAudioDevice {
-    fn display_name(&self) -> &str {
-        &self.name
+    fn display_name(&self) -> Cow<'_, str> {
+        format!("{}:{}", self.client, self.name).into()
     }
 
     fn num_channels(&self) -> usize {
@@ -254,10 +255,10 @@ impl JackClientPatchExt for jack::Client {
     ) -> anyhow::Result<()> {
         match command {
             JackPatchCommand::CaptureDevices { result_sender } => {
-                result_sender.send(self.get_devices(jack::PortFlags::IS_INPUT))?;
+                result_sender.send(self.get_devices(jack::PortFlags::IS_OUTPUT))?;
             }
             JackPatchCommand::PlaybackDevices { result_sender } => {
-                result_sender.send(self.get_devices(jack::PortFlags::IS_OUTPUT))?;
+                result_sender.send(self.get_devices(jack::PortFlags::IS_INPUT))?;
             }
             JackPatchCommand::CurrentPatch { result_sender } => {
                 result_sender.send(Err(anyhow::anyhow!("find a solution for this")))?;

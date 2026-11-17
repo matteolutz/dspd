@@ -1,7 +1,7 @@
-use std::{any::Any, sync::Arc};
+use std::{any::Any, borrow::Cow, sync::Arc};
 
 pub trait AudioDevice: Send + Sync {
-    fn display_name(&self) -> &str;
+    fn display_name(&self) -> Cow<'_, str>;
     fn num_channels(&self) -> usize;
 
     fn as_any(&self) -> &dyn Any;

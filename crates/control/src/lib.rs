@@ -587,7 +587,7 @@ async fn ws_stream(mut socket: WebSocket, s: Shared, hz: u32) {
     }
 }
 
-async fn get_patch_inputs(State(s): State<Shared>) -> Result<Json<Value>, ApiError> {
+async fn get_patch_capture_devices(State(s): State<Shared>) -> Result<Json<Value>, ApiError> {
     let Some(patching) = s.patching.as_ref() else {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -616,7 +616,7 @@ async fn get_patch_inputs(State(s): State<Shared>) -> Result<Json<Value>, ApiErr
 
     Ok(Json(json!({ "devices": input_devices })))
 }
-async fn get_patch_outputs(State(s): State<Shared>) -> Result<Json<Value>, ApiError> {
+async fn get_patch_playback_devices(State(s): State<Shared>) -> Result<Json<Value>, ApiError> {
     let Some(patching) = s.patching.as_ref() else {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -660,8 +660,8 @@ pub fn router(state: Shared) -> Router {
         .route("/strips/{strip}/stages/{id}", delete(remove_stage))
         .route("/strips/{strip}/stages/{id}/move", post(move_stage))
         .route("/strips/{strip}/order", put(set_order))
-        .route("/patch/inputs", get(get_patch_inputs))
-        .route("/patch/outputs", get(get_patch_outputs))
+        .route("/patch/capture", get(get_patch_capture_devices))
+        .route("/patch/playback", get(get_patch_playback_devices))
         .route("/ws", get(ws))
         .with_state(state)
 }
