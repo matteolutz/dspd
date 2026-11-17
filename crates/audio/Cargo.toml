@@ -10,7 +10,7 @@ rust-version.workspace = true
 default = []
 # Live I/O through WASAPI / CoreAudio / ALSA / JACK. Needs libasound2-dev on Linux.
 cpal-backend = ["dep:cpal"]
-jack-backend = ["dep:jack"]
+jack-backend = ["dep:jack", "dep:tokio"]
 aes67-backend = ["dep:tokio", "dep:thiserror", "dep:sdp-rs"]
 
 [dependencies]

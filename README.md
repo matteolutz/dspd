@@ -30,6 +30,23 @@ curl localhost:8080/stats
 Real audio devices: `cargo build --release --features cpal-backend`, then
 `dspd devices` and `dspd serve --backend cpal`. On Linux this needs `libasound2-dev`.
 
+The JACK backend also exposes live, backend-neutral patching through
+`dspd_audio::AudioPatching`. Obtain the handle before starting the backend:
+
+```rust
+use dspd_audio::{AudioBackend, JackBackend};
+
+let mut backend = JackBackend::new(/* channel and JACK options */)?;
+let patching = backend.patching().expect("JACK supports patching");
+
+patching.connect_input("system:capture_1", 0)?;
+patching.connect_output(0, "system:playback_1")?;
+```
+
+DSP ports are addressed by index; only external JACK ports use names. The same
+handle can connect, disconnect, inspect the current patch, and enumerate
+capture/playback ports while the backend is running.
+
 ## Layout
 
 | crate | role |
