@@ -2,7 +2,7 @@ use std::{
     ops::{Deref, DerefMut},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        mpsc, Arc,
     },
     time::Duration,
 };
@@ -10,10 +10,25 @@ use std::{
 use dspd_engine::{AudioBlock, BoxedProcessor};
 use jack::contrib::controller::ControlledProcessorTrait;
 
-use crate::{AudioBackend, RunReport};
+use crate::{
+    jack_backend::patch::{
+        JackAudioPatching, JackClientPatchExt, JackPatchCommand, JackPatchCommandExecutionCtx,
+    },
+    AudioBackend, RunReport,
+};
 
 mod daemon;
 pub use daemon::*;
+
+mod patch;
+
+fn dspd_input_port_name(dspd_input_idx: usize) -> String {
+    format!("input_{}", dspd_input_idx)
+}
+
+fn dspd_output_port_name(dspd_output_idx: usize) -> String {
+    format!("output_{}", dspd_output_idx)
+}
 
 #[derive(Default)]
 pub struct JackBackendDaemonOptions {
@@ -33,6 +48,9 @@ pub struct JackBackend {
     max_block_size: usize,
 
     sample_rate: u32,
+
+    patch_command_recv: mpsc::Receiver<JackPatchCommand>,
+    patching: Arc<JackAudioPatching>,
 
     daemon: Option<JackDaemon>,
 }
@@ -60,6 +78,11 @@ impl JackBackend {
             })?);
         }
 
+        let (patch_command_sender, patch_command_recv) = mpsc::channel();
+        let patching = JackAudioPatching {
+            commands: patch_command_sender,
+        };
+
         Ok(Self {
             in_channels,
             out_channels,
@@ -67,6 +90,8 @@ impl JackBackend {
             max_block_size,
             sample_rate,
             daemon,
+            patch_command_recv,
+            patching: Arc::new(patching),
         })
     }
 }
@@ -188,7 +213,7 @@ impl AudioBackend for JackBackend {
         let in_ports: Vec<_> = (0..self.in_channels)
             .map(|channel| {
                 client.register_port(
-                    format!("input_{}", channel).as_str(),
+                    dspd_input_port_name(channel).as_str(),
                     jack::AudioIn::default(),
                 )
             })
@@ -200,7 +225,7 @@ impl AudioBackend for JackBackend {
         let out_ports: Vec<_> = (0..self.out_channels)
             .map(|channel| {
                 client.register_port(
-                    format!("output_{}", channel).as_str(),
+                    dspd_output_port_name(channel).as_str(),
                     jack::AudioOut::default(),
                 )
             })
@@ -230,6 +255,16 @@ impl AudioBackend for JackBackend {
         while !stop.load(Ordering::Relaxed) {
             for _notification in handle.drain_notifications() {}
 
+            let patch_command_ctx = JackPatchCommandExecutionCtx {
+                in_channels: self.in_channels,
+                out_channels: self.out_channels,
+            };
+            for patch_cmd in self.patch_command_recv.try_iter() {
+                _ = active_client
+                    .as_client()
+                    .handle_patch_command(patch_cmd, patch_command_ctx);
+            }
+
             std::thread::sleep(Duration::from_millis(50));
         }
 
@@ -245,5 +280,9 @@ impl AudioBackend for JackBackend {
             wall: started.elapsed(),
             stream_errors: 0,
         })
+    }
+
+    fn patching(&self) -> Option<Arc<dyn crate::AudioPatching>> {
+        Some(self.patching.clone())
     }
 }

@@ -45,8 +45,8 @@ use axum::response::IntoResponse;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use dspd_engine::{
-    EditError, Editor, EngineStats, MeterBank, MeterInfo, ParamEvent, ParamSender, Registry,
-    SessionSpec, StageSpec, StatsSnapshot,
+    AudioPatching, EditError, Editor, EngineStats, MeterBank, MeterInfo, ParamEvent, ParamSender,
+    Registry, SessionSpec, StageSpec, StatsSnapshot,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -84,6 +84,8 @@ pub struct ControlState {
     /// writing, so nothing reaches a half-replaced engine.
     gate: tokio::sync::RwLock<()>,
 
+    patching: Option<Arc<dyn AudioPatching>>,
+
     event_tx: tokio::sync::broadcast::Sender<WebSocketEvent>,
 }
 
@@ -94,6 +96,7 @@ impl ControlState {
         registry: Arc<Registry>,
         stats: Arc<EngineStats>,
         session_path: Option<PathBuf>,
+        patching: Option<Arc<dyn AudioPatching>>,
     ) -> Self {
         Self {
             params: Mutex::new(params),
@@ -108,6 +111,7 @@ impl ControlState {
             generation: AtomicU64::new(0),
             engine_up: AtomicBool::new(true),
             gate: tokio::sync::RwLock::new(()),
+            patching,
             event_tx: tokio::sync::broadcast::channel(16).0,
         }
     }
@@ -583,6 +587,65 @@ async fn ws_stream(mut socket: WebSocket, s: Shared, hz: u32) {
     }
 }
 
+async fn get_patch_inputs(State(s): State<Shared>) -> Result<Json<Value>, ApiError> {
+    let Some(patching) = s.patching.as_ref() else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(
+                json!({ "error": "this server is run with a backend that doesn't support patching" }),
+            ),
+        ));
+    };
+
+    let input_devices = patching
+        .capture_devices()
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": err.to_string()})),
+            )
+        })?
+        .into_iter()
+        .map(|d| {
+            json!({
+                "name": d.display_name(),
+                "channels": d.num_channels()
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Ok(Json(json!({ "devices": input_devices })))
+}
+async fn get_patch_outputs(State(s): State<Shared>) -> Result<Json<Value>, ApiError> {
+    let Some(patching) = s.patching.as_ref() else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(
+                json!({ "error": "this server is run with a backend that doesn't support patching" }),
+            ),
+        ));
+    };
+
+    let output_devices = patching
+        .playback_devices()
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": err.to_string()})),
+            )
+        })?
+        .into_iter()
+        .map(|d| {
+            json!({
+                "name": d.display_name(),
+                "channels": d.num_channels()
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Ok(Json(json!({ "devices": output_devices })))
+}
+
 /// Build the router. Exposed separately so tests can call it without a socket.
 pub fn router(state: Shared) -> Router {
     Router::new()
@@ -597,6 +660,8 @@ pub fn router(state: Shared) -> Router {
         .route("/strips/{strip}/stages/{id}", delete(remove_stage))
         .route("/strips/{strip}/stages/{id}/move", post(move_stage))
         .route("/strips/{strip}/order", put(set_order))
+        .route("/patch/inputs", get(get_patch_inputs))
+        .route("/patch/outputs", get(get_patch_outputs))
         .route("/ws", get(ws))
         .with_state(state)
 }
@@ -644,6 +709,7 @@ mod tests {
                 Arc::new(registry),
                 Arc::new(EngineStats::default()),
                 path,
+                None,
             )),
             rx,
         )

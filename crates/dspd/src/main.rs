@@ -443,43 +443,6 @@ fn serve(a: ServeArgs) -> Result<()> {
     let stats = engine.stats();
     let latency = engine.latency_frames();
 
-    let state = Arc::new(
-        ControlState::new(
-            params,
-            spec.clone(),
-            Arc::clone(&registry),
-            Arc::clone(&stats),
-            Some(a.session.clone()),
-        )
-        .with_meters(engine.meters(), engine.meter_infos())
-        .with_editor(editor.expect("editor should be present. we passed `true`")),
-    );
-
-    // The control API lives on a small tokio runtime; the audio side blocks this thread.
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .context("starting tokio runtime")?;
-    let listener = runtime
-        .block_on(tokio::net::TcpListener::bind(a.listen))
-        .with_context(|| format!("cannot bind control API to {}", a.listen))?;
-    runtime.spawn(async move {
-        if let Err(e) = dspd_control::serve(listener, state).await {
-            tracing::error!("control API stopped: {e:#}");
-        }
-    });
-
-    let stop = Arc::new(AtomicBool::new(false));
-    {
-        let stop = Arc::clone(&stop);
-        runtime.spawn(async move {
-            let _ = tokio::signal::ctrl_c().await;
-            tracing::info!("ctrl-c received, shutting down");
-            stop.store(true, Ordering::Relaxed);
-        });
-    }
-
     let mut backend: Box<dyn AudioBackend> = match a.backend {
         BackendArg::Null => Box::new(
             NullBackend::new(
@@ -535,6 +498,44 @@ fn serve(a: ServeArgs) -> Result<()> {
             )?)
         }
     };
+
+    let state = Arc::new(
+        ControlState::new(
+            params,
+            spec.clone(),
+            Arc::clone(&registry),
+            Arc::clone(&stats),
+            Some(a.session.clone()),
+            backend.patching(),
+        )
+        .with_meters(engine.meters(), engine.meter_infos())
+        .with_editor(editor.expect("editor should be present. we passed `true`")),
+    );
+
+    // The control API lives on a small tokio runtime; the audio side blocks this thread.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .context("starting tokio runtime")?;
+    let listener = runtime
+        .block_on(tokio::net::TcpListener::bind(a.listen))
+        .with_context(|| format!("cannot bind control API to {}", a.listen))?;
+    runtime.spawn(async move {
+        if let Err(e) = dspd_control::serve(listener, state).await {
+            tracing::error!("control API stopped: {e:#}");
+        }
+    });
+
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let stop = Arc::clone(&stop);
+        runtime.spawn(async move {
+            let _ = tokio::signal::ctrl_c().await;
+            tracing::info!("ctrl-c received, shutting down");
+            stop.store(true, Ordering::Relaxed);
+        });
+    }
 
     tracing::info!(
         "serving {} in / {} out at {} Hz, block {}, rack latency {} frames; ctrl-c to stop",

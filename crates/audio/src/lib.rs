@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use dspd_engine::Processor;
+use dspd_engine::{AudioPatching, Processor};
 
 mod null;
 mod offline;
@@ -63,4 +63,9 @@ pub trait AudioBackend {
         processor: Box<dyn Processor + Send>,
         stop: Arc<AtomicBool>,
     ) -> Result<RunReport>;
+
+    /// Return a live patching handle when this backend supports routing.
+    fn patching(&self) -> Option<Arc<dyn AudioPatching>> {
+        None
+    }
 }

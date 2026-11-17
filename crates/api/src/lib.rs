@@ -6,12 +6,14 @@
 
 mod block;
 mod meters;
+mod patch;
 mod plugin;
 mod processor;
 mod spec;
 
 pub use block::AudioBlock;
 pub use meters::{MeterBank, MeterInfo, MeterWriter, OptionalMeterWriter};
+pub use patch::{AudioDevice, AudioPatching, PatchEntry, PatchState};
 pub use plugin::{ParamDef, ParamUnit, PluginContext, PluginDescriptor};
 pub use processor::{BoxedProcessor, MeterSpec, MeterType, Processor};
 pub use spec::{ClapSpec, NativeSpec, StageSpec, StripSpec, Width};

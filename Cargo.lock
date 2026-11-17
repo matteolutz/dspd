@@ -1693,6 +1693,7 @@ dependencies = [
 name = "dspd-api"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "serde",
  "serde_json",
 ]
@@ -1706,6 +1707,7 @@ dependencies = [
  "dspd-engine",
  "dspd-plugin-gain",
  "hound",
+ "itertools 0.15.0",
  "jack 0.13.5",
  "rtrb",
  "sdp-rs",
