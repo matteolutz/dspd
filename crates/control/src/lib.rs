@@ -587,6 +587,26 @@ async fn ws_stream(mut socket: WebSocket, s: Shared, hz: u32) {
     }
 }
 
+async fn get_patch_current(State(s): State<Shared>) -> Result<Json<Value>, ApiError> {
+    let Some(patching) = s.patching.as_ref() else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(
+                json!({ "error": "this server is run with a backend that doesn't support patching" }),
+            ),
+        ));
+    };
+
+    let patch = patching.current_patch().map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": err.to_string()})),
+        )
+    })?;
+
+    Ok(Json(json!({ "patch": patch })))
+}
+
 async fn get_patch_capture_devices(State(s): State<Shared>) -> Result<Json<Value>, ApiError> {
     let Some(patching) = s.patching.as_ref() else {
         return Err((
@@ -660,6 +680,7 @@ pub fn router(state: Shared) -> Router {
         .route("/strips/{strip}/stages/{id}", delete(remove_stage))
         .route("/strips/{strip}/stages/{id}/move", post(move_stage))
         .route("/strips/{strip}/order", put(set_order))
+        .route("/patch/current", get(get_patch_current))
         .route("/patch/capture", get(get_patch_capture_devices))
         .route("/patch/playback", get(get_patch_playback_devices))
         .route("/ws", get(ws))
