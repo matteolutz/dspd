@@ -1,4 +1,4 @@
-use dspd_engine::{AudioDevice, AudioPatching, PatchState};
+use dspd_engine::{AudioDevice, AudioPatching, PatchEntry, PatchState};
 
 use crate::jack_backend::{dspd_input_port_name, dspd_output_port_name};
 use std::{
@@ -16,8 +16,12 @@ pub struct JackAudioDevice {
 }
 
 impl AudioDevice for JackAudioDevice {
-    fn display_name(&self) -> Cow<'_, str> {
+    fn id(&self) -> Cow<'_, str> {
         format!("{}:{}", self.client, self.name).into()
+    }
+
+    fn display_name(&self) -> Cow<'_, str> {
+        self.id()
     }
 
     fn num_channels(&self) -> usize {
@@ -30,6 +34,20 @@ impl AudioDevice for JackAudioDevice {
 }
 
 impl JackAudioDevice {
+    fn channel_to_channel_idx(&self, channel: usize) -> anyhow::Result<usize> {
+        if channel < self.start_channel || channel >= self.start_channel + self.n_channels {
+            anyhow::bail!(
+                "channel {} is out of range for device {} with {} channels starting at {}",
+                channel,
+                self.name,
+                self.n_channels,
+                self.start_channel
+            );
+        }
+
+        Ok(channel - self.start_channel)
+    }
+
     fn to_port_name(&self, channel_idx: usize) -> anyhow::Result<String> {
         if channel_idx >= self.n_channels {
             anyhow::bail!(
@@ -194,7 +212,10 @@ pub(super) struct JackPatchCommandExecutionCtx {
 }
 
 pub(super) trait JackClientPatchExt {
-    fn get_devices(&self, flags: jack::PortFlags) -> anyhow::Result<Vec<Arc<dyn AudioDevice>>>;
+    fn get_devices(
+        &self,
+        flags: jack::PortFlags,
+    ) -> anyhow::Result<(Vec<JackAudioDevice>, HashMap<(String, String), usize>)>;
 
     fn handle_patch_command(
         &self,
@@ -204,7 +225,10 @@ pub(super) trait JackClientPatchExt {
 }
 
 impl JackClientPatchExt for jack::Client {
-    fn get_devices(&self, flags: jack::PortFlags) -> anyhow::Result<Vec<Arc<dyn AudioDevice>>> {
+    fn get_devices(
+        &self,
+        flags: jack::PortFlags,
+    ) -> anyhow::Result<(Vec<JackAudioDevice>, HashMap<(String, String), usize>)> {
         let mut devices: Vec<JackAudioDevice> = Vec::new();
         let mut index: HashMap<(String, String), usize> = HashMap::new();
 
@@ -242,26 +266,64 @@ impl JackClientPatchExt for jack::Client {
             }
         }
 
-        Ok(devices
-            .into_iter()
-            .map(|d| Arc::new(d) as Arc<dyn AudioDevice>)
-            .collect())
+        Ok((devices, index))
     }
 
     fn handle_patch_command(
         &self,
         command: JackPatchCommand,
-        _ctx: JackPatchCommandExecutionCtx,
+        ctx: JackPatchCommandExecutionCtx,
     ) -> anyhow::Result<()> {
         match command {
             JackPatchCommand::CaptureDevices { result_sender } => {
-                result_sender.send(self.get_devices(jack::PortFlags::IS_OUTPUT))?;
+                result_sender.send(self.get_devices(jack::PortFlags::IS_OUTPUT).map(
+                    |(d, _)| {
+                        d.into_iter()
+                            .map(|d| Arc::new(d) as Arc<dyn AudioDevice>)
+                            .collect()
+                    },
+                ))?;
             }
             JackPatchCommand::PlaybackDevices { result_sender } => {
-                result_sender.send(self.get_devices(jack::PortFlags::IS_INPUT))?;
+                result_sender.send(self.get_devices(jack::PortFlags::IS_INPUT).map(|(d, _)| {
+                    d.into_iter()
+                        .map(|d| Arc::new(d) as Arc<dyn AudioDevice>)
+                        .collect()
+                }))?;
             }
             JackPatchCommand::CurrentPatch { result_sender } => {
-                result_sender.send(Err(anyhow::anyhow!("find a solution for this")))?;
+                let find_connections = |direction: &str,
+                                        port_flags: jack::PortFlags,
+                                        n_channels: usize| {
+                    let (devices, device_idx) = self.get_devices(port_flags).unwrap_or_default();
+
+                    (0..n_channels)
+                        .map(|channel| {
+                            let port_name = format!("{}:{}_{}", self.name(), direction, channel);
+                            let port = self.port_by_name(&port_name)?;
+                            let connections = port.get_connections();
+                            let port_connection = connections.get(0)?;
+
+                            let (client, port) = port_connection.split_once(':')?;
+                            let (name, _) = split_channel_suffix(port);
+
+                            let idx = *device_idx.get(&(client.to_string(), name.to_string()))?;
+                            let device = &devices[idx];
+                            let channel_idx = device.channel_to_channel_idx(channel).ok()?;
+
+                            Some(PatchEntry {
+                                device_id: device.id().to_string(),
+                                channel_idx,
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                };
+
+                let inputs = find_connections("input", jack::PortFlags::IS_OUTPUT, ctx.in_channels);
+                let outputs =
+                    find_connections("output", jack::PortFlags::IS_INPUT, ctx.out_channels);
+
+                result_sender.send(Ok(PatchState { inputs, outputs }))?;
             }
             JackPatchCommand::ConnectInput {
                 input_port,

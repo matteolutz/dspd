@@ -1,6 +1,7 @@
 use std::{any::Any, borrow::Cow, sync::Arc};
 
 pub trait AudioDevice: Send + Sync {
+    fn id(&self) -> Cow<'_, str>;
     fn display_name(&self) -> Cow<'_, str>;
     fn num_channels(&self) -> usize;
 
@@ -8,8 +9,8 @@ pub trait AudioDevice: Send + Sync {
 }
 
 pub struct PatchEntry {
-    device: Arc<dyn AudioDevice>,
-    channel_idx: usize,
+    pub device_id: String,
+    pub channel_idx: usize,
 }
 
 pub struct PatchState {
