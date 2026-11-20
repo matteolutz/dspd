@@ -10,6 +10,7 @@ use std::{
 
 pub type JackAudioDeviceId = (String, String);
 
+#[derive(Debug)]
 pub struct JackAudioDevice {
     client: String,
     name: String,
