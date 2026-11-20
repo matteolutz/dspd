@@ -299,6 +299,8 @@ impl JackClientPatchExt for jack::Client {
                                         n_channels: usize| {
                     let (devices, device_idx) = self.get_devices(port_flags).unwrap_or_default();
 
+                    tracing::warn!("devices: {:#?}, idx: {:#?}", devices, device_idx);
+
                     (0..n_channels)
                         .map(|channel| {
                             let port_name = format!("{}:{}_{}", self.name(), direction, channel);
