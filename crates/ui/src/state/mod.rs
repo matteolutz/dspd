@@ -23,6 +23,9 @@ pub use selection::*;
 
 pub mod tab;
 
+mod patch;
+pub use patch::*;
+
 use gpui_kit::{App, AppContext, AsyncApp, Entity, Global, Subscription, Task};
 
 use crate::state::{registry::Registry, tab::UiTab};
@@ -34,6 +37,8 @@ pub struct UiState {
     stats: Entity<EngineStats>,
     registry: Entity<Registry>,
     session: Entity<Session>,
+
+    patch: Entity<UiPatchState>,
 
     tab_state: Entity<UiTab>,
     strip_selection: Entity<StripSelection>,
@@ -88,6 +93,10 @@ impl UiState {
 
     pub fn is_websocket_connected(cx: &App) -> Entity<bool> {
         cx.global::<Self>().websocket.read(cx).is_connected.clone()
+    }
+
+    pub fn patch(cx: &App) -> Entity<UiPatchState> {
+        cx.global::<Self>().patch.clone()
     }
 }
 
@@ -190,7 +199,18 @@ impl UiState {
                     session.set_stage_order(*strip, order.clone(), cx);
                 });
             }
+            WebSocketEvent::PatchChanged => {
+                let session = UiState::session(cx);
+                let client = UiState::client(cx);
+                UiState::patch(cx).update(cx, move |p, cx| {
+                    p.update_patch_detached(client, session, cx)
+                });
+            }
         });
+
+        let patch = UiPatchState::get(&client, &session, cx)
+            .await
+            .expect("Failed to get patch state");
 
         let (stats, stats_task) = EngineStats::start_fetching(client.clone(), cx);
 
@@ -209,6 +229,7 @@ impl UiState {
             websocket,
             tab_state,
             strip_selection,
+            patch,
             _tasks,
             _subs,
         };

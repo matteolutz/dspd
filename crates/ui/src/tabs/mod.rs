@@ -6,6 +6,9 @@ pub use strips::*;
 mod rack;
 pub use rack::*;
 
+mod patch;
+pub use patch::*;
+
 mod utils;
 
 pub fn init(cx: &mut App) {

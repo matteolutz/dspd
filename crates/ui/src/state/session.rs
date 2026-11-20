@@ -9,12 +9,18 @@ pub struct SerializableSession {
     sample_rate: u32,
     max_block: usize,
 
+    inputs: usize,
+    outputs: usize,
+
     strips: Vec<SerializableStrip>,
 }
 
 pub struct Session {
     pub(super) sample_rate: u32,
     pub(super) max_block: usize,
+
+    pub(super) inputs: usize,
+    pub(super) outputs: usize,
 
     pub(super) strips: Vec<Entity<Strip>>,
 }
@@ -29,6 +35,8 @@ impl Session {
         Self {
             sample_rate: value.sample_rate,
             max_block: value.max_block,
+            inputs: value.inputs,
+            outputs: value.outputs,
             strips: value
                 .strips
                 .into_iter()
@@ -121,6 +129,14 @@ impl Session {
             .iter()
             .map(|s| s.read(cx).stages_without_io_meters(cx).count())
             .sum()
+    }
+
+    pub fn num_inputs(&self) -> usize {
+        self.inputs
+    }
+
+    pub fn num_outputs(&self) -> usize {
+        self.outputs
     }
 }
 

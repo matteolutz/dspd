@@ -28,6 +28,7 @@ struct HelloWorld {
     // Tabs
     strips_tab: Entity<tabs::StripsTab>,
     rack_tab: Entity<tabs::RackTab>,
+    patch_tab: Entity<tabs::PatchTab>,
 
     _subs: Vec<Subscription>,
 }
@@ -46,6 +47,7 @@ impl HelloWorld {
 
         let strips_tab = cx.new(|cx| tabs::StripsTab::new(window, cx));
         let rack_tab = cx.new(|cx| tabs::RackTab::new(window, cx));
+        let patch_tab = cx.new(|cx| tabs::PatchTab::new(window, cx));
 
         Self {
             stats,
@@ -54,6 +56,7 @@ impl HelloWorld {
 
             strips_tab,
             rack_tab,
+            patch_tab,
 
             _subs,
         }
@@ -167,6 +170,7 @@ impl Render for HelloWorld {
             .child(match selected_tab {
                 UiTab::Strips => self.strips_tab.clone().into_any_element(),
                 UiTab::Rack => self.rack_tab.clone().into_any_element(),
+                UiTab::Patch => self.patch_tab.clone().into_any_element(),
                 _ => div()
                     .w_full()
                     .flex_1()
@@ -234,7 +238,7 @@ fn main() {
         components::init(cx);
         tabs::init(cx);
 
-        gpui_kit::block_on(UiState::init("http://localhost:8080", cx));
+        gpui_kit::block_on(UiState::init("http://192.168.2.165:8080", cx));
 
         open_window(
             WindowOptions {

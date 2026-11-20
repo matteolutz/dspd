@@ -46,6 +46,8 @@ pub enum WebSocketMessage {
         strip: usize,
         order: Vec<u32>,
     },
+
+    PatchChanged,
 }
 
 pub struct WebSocket {
@@ -90,6 +92,8 @@ pub enum WebSocketEvent {
         strip: usize,
         order: Vec<u32>,
     },
+
+    PatchChanged,
 }
 
 impl EventEmitter<WebSocketEvent> for WebSocket {}
@@ -208,6 +212,11 @@ impl WebSocket {
                                     WebSocketMessage::StageOrder { strip, order } => {
                                         _ = this.update(cx, |_, cx| {
                                             cx.emit(WebSocketEvent::StageOrder { strip, order })
+                                        });
+                                    }
+                                    WebSocketMessage::PatchChanged => {
+                                        _ = this.update(cx, |_, cx| {
+                                            cx.emit(WebSocketEvent::PatchChanged)
                                         });
                                     }
                                 }

@@ -1,6 +1,9 @@
+use dspd_api::PatchState;
 use gpui_kit::{AppContext, Task};
 
-use crate::state::{registry::Registry, EngineStats, SerializableSession};
+use crate::state::{
+    registry::Registry, AudioDevice, EngineStats, PatchDirection, SerializableSession,
+};
 
 pub struct DspdHttpClient {
     server_url: reqwest::Url,
@@ -61,6 +64,74 @@ impl DspdHttpClient {
 
     pub fn get_stats(&self, cx: &impl AppContext) -> Task<reqwest::Result<EngineStats>> {
         self.get("/stats").send_async(cx, |res| res.json())
+    }
+
+    pub fn get_capture_devices(
+        &self,
+        cx: &impl AppContext,
+    ) -> Task<reqwest::Result<Vec<AudioDevice>>> {
+        self.get("/patch/capture").send_async(cx, |res| res.json())
+    }
+
+    pub fn get_playback_devices(
+        &self,
+        cx: &impl AppContext,
+    ) -> Task<reqwest::Result<Vec<AudioDevice>>> {
+        self.get("/patch/playback").send_async(cx, |res| res.json())
+    }
+
+    pub fn get_current_patch(&self, cx: &impl AppContext) -> Task<reqwest::Result<PatchState>> {
+        self.get("/patch/current").send_async(cx, |res| res.json())
+    }
+
+    pub fn patch_capture_device(
+        &self,
+        device_id: &str,
+        device_channel_idx: usize,
+        dpsd_channel_idx: usize,
+        cx: &impl AppContext,
+    ) -> Task<reqwest::Result<()>> {
+        self.post("/patch/capture")
+            .json(&serde_json::json!({
+                "device_id": device_id,
+                "device_channel_idx": device_channel_idx,
+                "channel_idx": dpsd_channel_idx,
+            }))
+            .send_async(cx, |res| res.json())
+    }
+
+    pub fn patch_playback_device(
+        &self,
+        device_id: &str,
+        device_channel_idx: usize,
+        dpsd_channel_idx: usize,
+        cx: &impl AppContext,
+    ) -> Task<reqwest::Result<()>> {
+        self.post("/patch/playback")
+            .json(&serde_json::json!({
+                "device_id": device_id,
+                "device_channel_idx": device_channel_idx,
+                "channel_idx": dpsd_channel_idx,
+            }))
+            .send_async(cx, |res| res.json())
+    }
+
+    pub fn patch_device(
+        &self,
+        direction: PatchDirection,
+        device_id: &str,
+        device_channel_idx: usize,
+        dpsd_channel_idx: usize,
+        cx: &impl AppContext,
+    ) -> Task<reqwest::Result<()>> {
+        match direction {
+            PatchDirection::Capture => {
+                self.patch_capture_device(device_id, device_channel_idx, dpsd_channel_idx, cx)
+            }
+            PatchDirection::Playback => {
+                self.patch_playback_device(device_id, device_channel_idx, dpsd_channel_idx, cx)
+            }
+        }
     }
 
     // ---------- POST requests ----------
@@ -127,6 +198,10 @@ impl RequestBuilderExt for reqwest::blocking::RequestBuilder {
     where
         R: Send + 'static,
     {
-        cx.background_spawn(async move { self.send().and_then(transform) })
+        cx.background_spawn(async move {
+            self.send()
+                .and_then(|res| res.error_for_status())
+                .and_then(transform)
+        })
     }
 }
