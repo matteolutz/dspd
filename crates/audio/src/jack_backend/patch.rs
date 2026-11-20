@@ -300,8 +300,6 @@ impl JackClientPatchExt for jack::Client {
                                         n_channels: usize| {
                     let (devices, device_idx) = self.get_devices(port_flags).unwrap_or_default();
 
-                    tracing::warn!("devices: {:#?}, idx: {:#?}", devices, device_idx);
-
                     (0..n_channels)
                         .map(|channel| {
                             let port_name = format!("{}:{}_{}", self.name(), direction, channel);
@@ -309,29 +307,13 @@ impl JackClientPatchExt for jack::Client {
                             let connections = port.get_connections();
                             let port_connection = connections.get(0)?;
 
-                            tracing::warn!(
-                                "{} port idx {} connection 0 = {:?}",
-                                direction,
-                                channel,
-                                port_connection
-                            );
-
                             let (client, port) = port_connection.split_once(':')?;
                             let (name, device_channel) = split_channel_suffix(port);
                             let device_channel = device_channel?;
 
-                            tracing::warn!("client = {:?}, name = {:?}", client, name);
-
                             let idx = *device_idx.get(&(client.to_string(), name.to_string()))?;
-                            tracing::warn!("got idx: {}", idx);
                             let device = &devices[idx];
                             let channel_idx = device.channel_to_channel_idx(device_channel).ok()?;
-
-                            tracing::warn!(
-                                "device_id = {:?}, channel_idx = {}",
-                                device.id(),
-                                channel_idx
-                            );
 
                             Some(PatchEntry {
                                 device_id: device.id().to_string(),
