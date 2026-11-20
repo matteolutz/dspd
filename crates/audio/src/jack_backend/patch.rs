@@ -322,6 +322,7 @@ impl JackClientPatchExt for jack::Client {
                             tracing::warn!("client = {:?}, name = {:?}", client, name);
 
                             let idx = *device_idx.get(&(client.to_string(), name.to_string()))?;
+                            tracing::warn!("got idx: {}", idx);
                             let device = &devices[idx];
                             let channel_idx = device.channel_to_channel_idx(channel).ok()?;
 
