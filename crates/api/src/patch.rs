@@ -8,13 +8,13 @@ pub trait AudioDevice: Send + Sync {
     fn as_any(&self) -> &dyn Any;
 }
 
-#[derive(serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PatchEntry {
     pub device_id: String,
     pub channel_idx: usize,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct PatchState {
     pub inputs: Vec<Option<PatchEntry>>,
     pub outputs: Vec<Option<PatchEntry>>,

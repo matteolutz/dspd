@@ -45,6 +45,8 @@ pub enum WebSocketEvent {
         strip: usize,
         order: Vec<u32>,
     },
+
+    PatchChanged,
 }
 
 pub trait WebSocketExt {

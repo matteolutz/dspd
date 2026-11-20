@@ -46,7 +46,7 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use dspd_engine::{
     AudioPatching, EditError, Editor, EngineStats, MeterBank, MeterInfo, ParamEvent, ParamSender,
-    Registry, SessionSpec, StageSpec, StatsSnapshot,
+    PatchState, Registry, SessionSpec, StageSpec, StatsSnapshot,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -587,7 +587,7 @@ async fn ws_stream(mut socket: WebSocket, s: Shared, hz: u32) {
     }
 }
 
-async fn get_patch_current(State(s): State<Shared>) -> Result<Json<Value>, ApiError> {
+async fn get_patch_current(State(s): State<Shared>) -> Result<Json<PatchState>, ApiError> {
     let Some(patching) = s.patching.as_ref() else {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -604,10 +604,10 @@ async fn get_patch_current(State(s): State<Shared>) -> Result<Json<Value>, ApiEr
         )
     })?;
 
-    Ok(Json(json!({ "patch": patch })))
+    Ok(Json(patch))
 }
 
-async fn get_patch_capture_devices(State(s): State<Shared>) -> Result<Json<Value>, ApiError> {
+async fn get_patch_capture_devices(State(s): State<Shared>) -> Result<Json<Vec<Value>>, ApiError> {
     let Some(patching) = s.patching.as_ref() else {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -628,15 +628,17 @@ async fn get_patch_capture_devices(State(s): State<Shared>) -> Result<Json<Value
         .into_iter()
         .map(|d| {
             json!({
+                "id": d.id(),
                 "name": d.display_name(),
-                "channels": d.num_channels()
+                "num_channels": d.num_channels()
             })
         })
         .collect::<Vec<_>>();
 
-    Ok(Json(json!({ "devices": input_devices })))
+    Ok(Json(input_devices))
 }
-async fn get_patch_playback_devices(State(s): State<Shared>) -> Result<Json<Value>, ApiError> {
+
+async fn get_patch_playback_devices(State(s): State<Shared>) -> Result<Json<Vec<Value>>, ApiError> {
     let Some(patching) = s.patching.as_ref() else {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -657,13 +659,115 @@ async fn get_patch_playback_devices(State(s): State<Shared>) -> Result<Json<Valu
         .into_iter()
         .map(|d| {
             json!({
+                "id": d.id(),
                 "name": d.display_name(),
-                "channels": d.num_channels()
+                "num_channels": d.num_channels()
             })
         })
         .collect::<Vec<_>>();
 
-    Ok(Json(json!({ "devices": output_devices })))
+    Ok(Json(output_devices))
+}
+
+#[derive(Deserialize)]
+struct PatchRequest {
+    channel_idx: usize,
+    device_id: String,
+    device_channel_idx: usize,
+}
+
+async fn patch_capture_device(
+    State(s): State<Shared>,
+    Json(req): Json<PatchRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let Some(patching) = s.patching.as_ref() else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(
+                json!({ "error": "this server is run with a backend that doesn't support patching" }),
+            ),
+        ));
+    };
+
+    let input_devices = patching.capture_devices().map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": err.to_string()})),
+        )
+    })?;
+    let input_device = input_devices
+        .iter()
+        .find(|dev| dev.id() == req.device_id)
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "capture device not found"})),
+            )
+        })?;
+
+    patching
+        .connect_input(
+            input_device.as_ref(),
+            req.device_channel_idx,
+            req.channel_idx,
+        )
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": err.to_string()})),
+            )
+        })?;
+
+    _ = s.event_tx.send(WebSocketEvent::PatchChanged);
+
+    Ok(Json(json!({ "status": "ok" })))
+}
+
+async fn patch_playback_device(
+    State(s): State<Shared>,
+    Json(req): Json<PatchRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let Some(patching) = s.patching.as_ref() else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(
+                json!({ "error": "this server is run with a backend that doesn't support patching" }),
+            ),
+        ));
+    };
+
+    let output_devices = patching.playback_devices().map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": err.to_string()})),
+        )
+    })?;
+    let output_device = output_devices
+        .iter()
+        .find(|dev| dev.id() == req.device_id)
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "playback device not found"})),
+            )
+        })?;
+
+    patching
+        .connect_output(
+            req.channel_idx,
+            output_device.as_ref(),
+            req.device_channel_idx,
+        )
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": err.to_string()})),
+            )
+        })?;
+
+    _ = s.event_tx.send(WebSocketEvent::PatchChanged);
+
+    Ok(Json(json!({ "status": "ok" })))
 }
 
 /// Build the router. Exposed separately so tests can call it without a socket.
@@ -682,7 +786,9 @@ pub fn router(state: Shared) -> Router {
         .route("/strips/{strip}/order", put(set_order))
         .route("/patch/current", get(get_patch_current))
         .route("/patch/capture", get(get_patch_capture_devices))
+        .route("/patch/capture", post(patch_capture_device))
         .route("/patch/playback", get(get_patch_playback_devices))
+        .route("/patch/playback", post(patch_playback_device))
         .route("/ws", get(ws))
         .with_state(state)
 }
