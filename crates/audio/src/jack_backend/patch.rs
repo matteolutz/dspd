@@ -306,9 +306,11 @@ impl JackClientPatchExt for jack::Client {
                             let connections = port.get_connections();
                             let port_connection = connections.get(0)?;
 
-                            println!(
+                            tracing::warn!(
                                 "{} port idx {} connection 0 = {:?}",
-                                direction, channel, port_connection
+                                direction,
+                                channel,
+                                port_connection
                             );
 
                             let (client, port) = port_connection.split_once(':')?;
